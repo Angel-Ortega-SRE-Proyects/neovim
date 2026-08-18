@@ -1,23 +1,5 @@
 return {
   {
-    "nvim-lualine/lualine.nvim",
-    event = "VeryLazy",
-    config = function()
-      local sysmonitor = require("config.sysmonitor")
-      sysmonitor.start(3000)
-
-      require("lualine").setup({
-        sections = {
-          lualine_x = {
-            { sysmonitor.status },
-            "encoding",
-            "filetype",
-          },
-        },
-      })
-    end,
-  },
-  {
     "lewis6991/gitsigns.nvim",
     event = { "BufReadPre", "BufNewFile" },
     opts = {},

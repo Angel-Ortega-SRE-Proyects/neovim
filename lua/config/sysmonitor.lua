@@ -86,7 +86,7 @@ end
 
 --- Texto corto para la barra de estado, ej: " 12%  47%  63%"
 function M.status()
-  return string.format("󰍛 %d%%  %d%%  %d%%", cpu_pct, mem_pct, disk_pct)
+  return string.format(" %d%%  󰍛 %d%%  󰋊 %d%%", cpu_pct, mem_pct, disk_pct)
 end
 
 function M.values()

@@ -54,7 +54,7 @@ vim.api.nvim_create_user_command("Sys", function()
     height = height,
     row = math.floor((vim.o.lines - height) / 2),
     col = math.floor((vim.o.columns - width) / 2),
-    border = "curved",
+    border = "rounded",
     title = " Recursos del sistema (q para salir) ",
     title_pos = "center",
   })

@@ -18,4 +18,34 @@ function M.guard(cmd)
   end
 end
 
+-- Rama actual, cacheada y refrescada sola (no depende de tener un buffer de
+-- archivo enfocado, por eso funciona también parado en el explorador o en
+-- el dashboard). La usa lua/config/statusline.lua.
+local branch = ""
+
+local function refresh_branch()
+  local cwd = vim.fn.getcwd()
+  vim.system({ "git", "branch", "--show-current" }, { text = true, cwd = cwd }, function(res)
+    branch = (res.code == 0 and res.stdout) and vim.trim(res.stdout) or ""
+  end)
+end
+
+function M.branch()
+  return branch
+end
+
+function M.start_watch()
+  refresh_branch()
+  local timer = vim.uv.new_timer()
+  timer:start(
+    1000,
+    5000,
+    vim.schedule_wrap(refresh_branch)
+  )
+  vim.api.nvim_create_autocmd("DirChanged", {
+    group = vim.api.nvim_create_augroup("GitBranchWatch", { clear = true }),
+    callback = refresh_branch,
+  })
+end
+
 return M

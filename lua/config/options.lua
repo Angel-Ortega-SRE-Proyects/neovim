@@ -10,6 +10,7 @@ opt.scrolloff = 8
 opt.splitright = true
 opt.splitbelow = true
 opt.wrap = false
+opt.laststatus = 3 -- una sola barra de estado global (lualine.globalstatus)
 
 -- Indentation
 opt.expandtab = true

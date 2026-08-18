@@ -37,6 +37,7 @@ local GROUPS = {
     items = {
       { ":Term [comando]  /  <leader>tt", "Terminal como pestaña normal" },
       { ":Tf [comando]  /  <leader>tf  /  <C-\\>", "Terminal flotante" },
+      { "nvim <carpeta/archivo>  (dentro de la terminal)", "Reutiliza este Neovim en vez de anidar otro" },
     },
   },
   {
