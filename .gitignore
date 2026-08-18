@@ -1,0 +1,8 @@
+.luarc.json
+
+# higpertext: estado/telemetría en tiempo de ejecución, no es código fuente
+.higpertext/state/
+.higpertext/reports/
+
+# archivos sueltos de prueba
+hello.txt
