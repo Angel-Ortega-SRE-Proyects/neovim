@@ -5,13 +5,19 @@
 --   :Tf      terminal flotante (ventana encima, para comandos rápidos)
 --   :Term    terminal como pestaña normal (buffer en el área de edición,
 --            aparece en la barra de buffers igual que un archivo)
+--   :Tb      terminal como panel inferior (franja delgada pegada abajo,
+--            estilo VSCode) — para moverte, crear/borrar archivos y
+--            carpetas (cd, ls, mkdir, touch, rm, mv, etc.) sin perder de
+--            vista el editor
 --
 -- Uso:
 --   <C-\>          toggle terminal flotante
 --   <leader>tf       toggle terminal flotante
 --   <leader>tt       abrir/enfocar terminal en pestaña
+--   <leader>tb       toggle terminal panel inferior
 --   :Tf ls -la       abre la flotante y ejecuta ese comando
 --   :Term ls -la      abre la pestaña y ejecuta ese comando
+--   :Tb ls -la       abre el panel inferior y ejecuta ese comando
 local term_bufnr = nil
 
 local function open_tab_terminal(args)
@@ -79,6 +85,7 @@ return {
     { "<C-\\>", "<cmd>Tf<CR>", desc = "Toggle terminal (flotante)", mode = { "n", "t" } },
     { "<leader>tf", "<cmd>Tf<CR>", desc = "Floating terminal" },
     { "<leader>tt", "<cmd>Term<CR>", desc = "Terminal en pestaña" },
+    { "<leader>tb", "<cmd>Tb<CR>", desc = "Terminal panel inferior", mode = { "n", "t" } },
   },
   opts = {
     close_on_exit = true,
@@ -102,5 +109,40 @@ return {
         float_term:toggle()
       end
     end, { nargs = "*", desc = "Floating terminal (opcional: comando a ejecutar)" })
+
+    -- Título con ícono para el panel inferior, ya que a diferencia de la
+    -- flotante (que tiene borde+title propio) un split horizontal no
+    -- muestra nada por defecto. Se reaplica al cambiar de colorscheme.
+    local function set_term_highlights()
+      vim.api.nvim_set_hl(0, "ToggletermTitle", { fg = "#7dcfff", bold = true })
+    end
+    set_term_highlights()
+    vim.api.nvim_create_autocmd("ColorScheme", {
+      group = vim.api.nvim_create_augroup("ToggletermTitleHl", { clear = true }),
+      callback = set_term_highlights,
+    })
+
+    -- Panel inferior: franja horizontal delgada pegada al fondo (estilo
+    -- VSCode), para navegar y hacer operaciones básicas de archivos
+    -- (cd, ls, mkdir, touch, rm, mv, cp) sin taparte todo el editor.
+    local bottom_term = require("toggleterm.terminal").Terminal:new({
+      direction = "horizontal",
+      size = 12,
+      close_on_exit = false,
+      on_open = function(term)
+        vim.wo[term.window].winbar = "%#ToggletermTitle#  bash · panel inferior%#StatusLine#"
+      end,
+    })
+
+    vim.api.nvim_create_user_command("Tb", function(cmd_opts)
+      if cmd_opts.args ~= "" then
+        bottom_term:open()
+        vim.defer_fn(function()
+          bottom_term:send(cmd_opts.args, false)
+        end, 50)
+      else
+        bottom_term:toggle()
+      end
+    end, { nargs = "*", desc = "Terminal panel inferior (opcional: comando a ejecutar)" })
   end,
 }

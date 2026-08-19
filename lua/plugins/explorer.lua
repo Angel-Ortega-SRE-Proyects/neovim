@@ -21,6 +21,21 @@ return {
         require("nvim-tree.api").tree.open()
       end,
     })
+
+    -- Color propio para las carpetas (cerradas, abiertas, vacías) en vez del
+    -- gris apagado por defecto. Se reaplica al cambiar de colorscheme.
+    local function set_highlights()
+      vim.api.nvim_set_hl(0, "NvimTreeFolderIcon", { fg = "#7aa2f7" })
+      vim.api.nvim_set_hl(0, "NvimTreeFolderName", { fg = "#c0caf5" })
+      vim.api.nvim_set_hl(0, "NvimTreeOpenedFolderName", { fg = "#7dcfff", bold = true })
+      vim.api.nvim_set_hl(0, "NvimTreeEmptyFolderName", { fg = "#565f89", italic = true })
+      vim.api.nvim_set_hl(0, "NvimTreeIndentMarker", { fg = "#3b4261" })
+    end
+    set_highlights()
+    vim.api.nvim_create_autocmd("ColorScheme", {
+      group = vim.api.nvim_create_augroup("NvimTreeHighlights", { clear = true }),
+      callback = set_highlights,
+    })
   end,
   opts = {
     -- Sin esto, el árbol ignora los :cd (incluido el que dispara la
@@ -43,6 +58,18 @@ return {
           folder = true,
           folder_arrow = true,
           git = true,
+        },
+        glyphs = {
+          folder = {
+            arrow_closed = "",
+            arrow_open = "",
+            default = "",
+            open = "",
+            empty = "",
+            empty_open = "",
+            symlink = "",
+            symlink_open = "",
+          },
         },
       },
     },

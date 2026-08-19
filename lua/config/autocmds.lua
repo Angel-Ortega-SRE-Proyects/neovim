@@ -16,10 +16,59 @@ autocmd("BufWritePre", {
   command = [[%s/\s\+$//e]],
 })
 
+-- Muestra el mensaje del diagnóstico (warning/error) automáticamente en un
+-- flotante al detenerte sobre esa línea/palabra, sin tener que pulsar
+-- <leader>d cada vez. updatetime=250 (options.lua) controla qué tan rápido
+-- dispara.
+autocmd("CursorHold", {
+  group = augroup("DiagnosticHover", { clear = true }),
+  callback = function()
+    if vim.bo.filetype == "NvimTree" then
+      return
+    end
+    vim.diagnostic.open_float(nil, { focusable = false, scope = "cursor", border = "rounded" })
+  end,
+})
+
+-- Lo mismo pero en el explorador: al detenerte sobre un archivo con
+-- warning/error (el ⚠ que se ve en el árbol), muestra sus mensajes.
+autocmd("FileType", {
+  pattern = "NvimTree",
+  group = augroup("NvimTreeDiagnosticHover", { clear = true }),
+  callback = function(args)
+    autocmd("CursorHold", {
+      buffer = args.buf,
+      group = augroup("NvimTreeDiagnosticHoverBuf" .. args.buf, { clear = true }),
+      callback = function()
+        local ok, api = pcall(require, "nvim-tree.api")
+        if not ok then
+          return
+        end
+        local node = api.tree.get_node_under_cursor()
+        if not node or node.type ~= "file" then
+          return
+        end
+        local bufnr = vim.fn.bufnr(node.absolute_path)
+        if bufnr == -1 then
+          return
+        end
+        local diags = vim.diagnostic.get(bufnr)
+        if #diags == 0 then
+          return
+        end
+        local lines = {}
+        for _, d in ipairs(diags) do
+          table.insert(lines, string.format("[%s] %s", vim.diagnostic.severity[d.severity], d.message))
+        end
+        vim.lsp.util.open_floating_preview(lines, "plaintext", { border = "rounded", focusable = false })
+      end,
+    })
+  end,
+})
+
 -- Terminal <-> Neovim/Explorer cwd sync, para cualquier buffer de terminal
 -- (:Tf flotante de toggleterm, :Term como pestaña, o un :terminal a pelo).
-local OSC7_HOOK = [[PROMPT_COMMAND='printf "\033]7;file://%s\a" "$PWD"'; clear]]
-
+--
 -- Evita "nvim dentro de nvim dentro de nvim": si dentro de una terminal
 -- integrada escribes `nvim <algo>`, en vez de abrir un Neovim anidado,
 -- reutiliza ESTA instancia (usa $NVIM, que Neovim ya exporta a sus
@@ -53,9 +102,36 @@ autocmd("TermOpen", {
     vim.defer_fn(function()
       local job = vim.b[args.buf].terminal_job_id
       if job then
-        vim.fn.chansend(job, NVIM_GUARD .. "\n" .. OSC7_HOOK .. "\n")
+        vim.fn.chansend(job, NVIM_GUARD .. "\n")
       end
     end, 50)
+  end,
+})
+
+-- El gutter de números (sobre todo relativenumber, que cambia de ancho) y el
+-- signcolumn desalinean dónde Neovim dibuja el cursor real de la terminal
+-- vs. donde el pty escribe. Se desactivan solo dentro del buffer de terminal.
+autocmd("TermOpen", {
+  group = augroup("TermNoGutter", { clear = true }),
+  callback = function(args)
+    vim.wo.number = false
+    vim.wo.relativenumber = false
+    vim.wo.signcolumn = "no"
+    vim.wo.cursorline = false
+  end,
+})
+
+-- Por defecto, <Esc> en modo terminal no hace nada (para no robarle el Esc
+-- a programas que corras ahí adentro, como un vim anidado o fzf); hay que
+-- usar <C-\><C-n>. Se mapea a <Esc> para salir a modo normal como en
+-- cualquier otro buffer, sin tener que hacer `exit`.
+-- Nota: si corres algo dentro de la terminal que también use Esc (otro
+-- vim, fzf, less...), ese Esc lo va a interceptar esto en vez de llegarle
+-- al programa — en ese caso usa <C-\><C-n> para salir.
+autocmd("TermOpen", {
+  group = augroup("TermEscToNormal", { clear = true }),
+  callback = function(args)
+    vim.keymap.set("t", "<Esc>", [[<C-\><C-n>]], { buffer = args.buf, desc = "Salir a modo normal" })
   end,
 })
 
@@ -81,29 +157,75 @@ autocmd("DirChanged", {
   end,
 })
 
--- Sync Neovim's cwd when the shell inside a terminal buffer cd's elsewhere
--- (shell reports its cwd via OSC 7). nvim-tree follows automatically via
--- DirChanged.
-autocmd("TermRequest", {
-  group = augroup("TermOsc7Sync", { clear = true }),
+-- Terminal -> Neovim/Explorer: sincroniza el cwd de Neovim cuando el shell
+-- dentro de una terminal hace `cd`. OSC 7 no sirve para esto: se probó en
+-- vivo y TermRequest nunca se dispara para esa secuencia en esta versión de
+-- Neovim (solo se dispara para secuencias que esperan respuesta, como OSC
+-- 52). En su lugar se lee el cwd real del proceso bash directamente de
+-- /proc/<pid>/cwd, cada segundo — no depende de que el shell coopere ni le
+-- pisa el PROMPT_COMMAND del usuario.
+local function poll_terminal_cwd()
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.bo[buf].buftype == "terminal" then
+      local job = vim.b[buf].terminal_job_id
+      local pid = job and vim.fn.jobpid(job)
+      if pid then
+        local dir = vim.uv.fs_readlink("/proc/" .. pid .. "/cwd")
+        if dir and dir ~= last_dir[buf] and dir ~= vim.fn.getcwd() then
+          last_dir[buf] = dir
+          vim.schedule(function()
+            vim.cmd.cd(dir)
+          end)
+        end
+      end
+    end
+  end
+end
+
+do
+  local timer = vim.uv.new_timer()
+  timer:start(1000, 1000, vim.schedule_wrap(poll_terminal_cwd))
+end
+
+-- Archivos que no son texto (documentos ofimáticos, que además son zips por
+-- dentro, e imágenes/binarios) se abren con la app del sistema en vez de
+-- cargarlos como buffer de texto — evita el problema de "manifest.xml"
+-- mostrando el listado del zip en vez de su contenido real.
+local OPEN_EXTERNALLY = {
+  "zip", "jar", "xpi", "odt", "ods", "odp", "docx", "xlsx", "pptx", "doc", "xls", "ppt",
+  "pdf", "iso",
+  "jpg", "jpeg", "png", "gif", "bmp", "webp", "svg",
+  "mp3", "mp4", "mov", "avi", "mkv", "wav",
+}
+local ext_pattern = {}
+for _, ext in ipairs(OPEN_EXTERNALLY) do
+  table.insert(ext_pattern, "*." .. ext)
+end
+
+autocmd("BufReadCmd", {
+  group = augroup("OpenExternally", { clear = true }),
+  pattern = ext_pattern,
   callback = function(args)
-    local seq = args.data and args.data.sequence or ""
-    local dir = seq:match("\027%]7;file://[^/]*(/[^\027\a]*)")
-    if not dir then
-      return
-    end
-    local ok, decoded = pcall(vim.uri_decode, dir)
-    dir = ok and decoded or dir
-    if dir ~= last_dir[args.buf] and vim.fn.isdirectory(dir) == 1 and dir ~= vim.fn.getcwd() then
-      last_dir[args.buf] = dir
-      -- TermRequest se dispara en un contexto restringido: si se hace :cd
-      -- aquí mismo, el DirChanged resultante no llega bien a nvim-tree.
-      vim.schedule(function()
-        vim.cmd.cd(dir)
-      end)
-    end
+    local path = args.file
+    vim.fn.jobstart({ "xdg-open", path }, { detach = true })
+    vim.schedule(function()
+      vim.notify("Abriendo con la app del sistema: " .. vim.fn.fnamemodify(path, ":t"), vim.log.levels.INFO)
+      if vim.api.nvim_buf_is_valid(args.buf) then
+        vim.cmd("bwipeout! " .. args.buf)
+      end
+    end)
   end,
 })
+
+-- Si estando parado en el explorador se ejecuta ":e" (recargar), Vim lo
+-- trata como un archivo normal y lo vacía, dejando una pestaña rota
+-- "NvimTree_1" separada del panel real. Un BufReadCmd no alcanza a
+-- prevenirlo (se probó en vivo: el buffer se vacía igual), así que se
+-- intercepta directo en la línea de comandos: si escribes ":e" estando en
+-- el explorador, se avisa en vez de ejecutarlo.
+vim.cmd(
+  [[cnoreabbrev <expr> e (&filetype ==# 'NvimTree') ? 'echo "Usa <leader>e/<leader>o para el explorador, no :e"' : 'e']]
+)
 
 -- Restore cursor position
 autocmd("BufReadPost", {

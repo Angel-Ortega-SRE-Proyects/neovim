@@ -21,3 +21,9 @@ map("v", "K", ":m '<-2<CR>gv=gv", { desc = "Move selection up" })
 -- File explorer / search (placeholders for plugin keymaps set in lua/plugins)
 map("n", "<leader>w", ":w<CR>", { desc = "Save file" })
 map("n", "<leader>q", ":q<CR>", { desc = "Quit" })
+
+-- Mismo resultado que "!" (filtrar por un comando externo), pero sin
+-- necesitar visual+! o normal+!+motion: abre directo la cmdline ":!" con el
+-- ícono de terminal (ver lua/plugins/noice.lua).
+map("n", "<leader>!", ":.!", { desc = "Filtrar línea actual por comando externo" })
+map("v", "<leader>!", ":!", { desc = "Filtrar selección por comando externo" })

@@ -18,7 +18,7 @@ local function git_branch()
   if status and ((status.added or 0) + (status.changed or 0) + (status.removed or 0)) > 0 then
     dirty = "*"
   end
-  return string.format("  %s%s", head, dirty)
+  return string.format("%%#StatuslineGitBranch#\u{f126} %s%s%%#StatusLine#", head, dirty)
 end
 
 local function diagnostics()
@@ -28,7 +28,14 @@ local function diagnostics()
   end
   local errors = counts[vim.diagnostic.severity.ERROR] or 0
   local warnings = counts[vim.diagnostic.severity.WARN] or 0
-  return string.format(" %d  %d", errors, warnings)
+  local parts = {}
+  if errors > 0 then
+    table.insert(parts, string.format("%%#StatuslineError# %d%%#StatusLine#", errors))
+  end
+  if warnings > 0 then
+    table.insert(parts, string.format("%%#StatuslineWarn# %d%%#StatusLine#", warnings))
+  end
+  return table.concat(parts, " ")
 end
 
 local function filename()
@@ -36,19 +43,33 @@ local function filename()
   if name == "" then
     return "[No Name]"
   end
-  local modified = vim.bo.modified and " ●" or ""
+  local modified = vim.bo.modified and " %#StatuslineWarn#●%#StatusLine#" or ""
   return name .. modified
 end
 
 local function position()
-  return string.format("Ln %d, Col %d", vim.fn.line("."), vim.fn.col("."))
+  return string.format("%%#StatuslinePos#Ln %d, Col %d%%#StatusLine#", vim.fn.line("."), vim.fn.col("."))
 end
 
 local function fileinfo()
   local enc = vim.bo.fileencoding ~= "" and vim.bo.fileencoding or vim.o.encoding
   local fmt = vim.bo.fileformat:upper()
   local ft = vim.bo.filetype ~= "" and vim.bo.filetype or "text"
-  return string.format("%s  %s  %s", enc:upper(), fmt, ft)
+  return string.format("%%#StatuslineDim#%s  %s  %s%%#StatusLine#", enc:upper(), fmt, ft)
+end
+
+local function sys_status()
+  local v = sysmonitor.values()
+  return table.concat({
+    string.format("%%#StatuslineCpu# %d%%%%%%#StatusLine#", v.cpu),
+    string.format("%%#StatuslineMem#󰍛 %.1f/%.1fGB%%#StatusLine#", v.mem_used_gb, v.mem_total_gb),
+    string.format("%%#StatuslineDisk#󰋊 %.0f/%.0fGB%%#StatusLine#", v.disk_used_gb, v.disk_total_gb),
+    string.format(
+      "%%#StatuslineNet#󰛳 ↓%s ↑%s%%#StatusLine#",
+      sysmonitor.fmt_rate(v.net_rx_bytes_per_sec),
+      sysmonitor.fmt_rate(v.net_tx_bytes_per_sec)
+    ),
+  }, "  ")
 end
 
 function M.render()
@@ -59,7 +80,7 @@ function M.render()
   }, "  ")
 
   local right = table.concat({
-    sysmonitor.status(),
+    sys_status(),
     position(),
     fileinfo(),
   }, "   ")
@@ -67,9 +88,29 @@ function M.render()
   return string.format(" %s%%=%s ", left, right)
 end
 
+-- Un color por sección para distinguir cada dato de un vistazo. Se reaplica
+-- en cada ColorScheme porque cambiar de tema borra los highlights custom.
+local function set_highlights()
+  vim.api.nvim_set_hl(0, "StatuslineGitBranch", { fg = "#e0af68", bold = true })
+  vim.api.nvim_set_hl(0, "StatuslineError", { fg = "#f7768e", bold = true })
+  vim.api.nvim_set_hl(0, "StatuslineWarn", { fg = "#ff9e64", bold = true })
+  vim.api.nvim_set_hl(0, "StatuslineCpu", { fg = "#7dcfff" })
+  vim.api.nvim_set_hl(0, "StatuslineMem", { fg = "#bb9af7" })
+  vim.api.nvim_set_hl(0, "StatuslineDisk", { fg = "#9ece6a" })
+  vim.api.nvim_set_hl(0, "StatuslineNet", { fg = "#7aa2f7" })
+  vim.api.nvim_set_hl(0, "StatuslinePos", { fg = "#c0caf5" })
+  vim.api.nvim_set_hl(0, "StatuslineDim", { fg = "#9aa5ce" })
+end
+
 function M.setup()
   vim.o.laststatus = 3
   vim.o.statusline = "%!v:lua.require('config.statusline').render()"
+
+  set_highlights()
+  vim.api.nvim_create_autocmd("ColorScheme", {
+    group = vim.api.nvim_create_augroup("StatuslineHighlights", { clear = true }),
+    callback = set_highlights,
+  })
 
   -- CPU/MEM/DISK cambian solos (no por moverte); fuerza redibujar la barra
   -- cada pocos segundos para que se vea "en tiempo real".
