@@ -13,6 +13,7 @@
 -- Uso:
 --   <C-\>          toggle terminal flotante
 --   <leader>tf       toggle terminal flotante
+--   (dentro de la flotante) A-hjkl mueve, A-=/A-- redimensiona
 --   <leader>tt       abrir/enfocar terminal en pestaña
 --   <leader>tb       toggle terminal panel inferior
 --   :Tf ls -la       abre la flotante y ejecuta ese comando
@@ -94,9 +95,71 @@ return {
   config = function(_, opts)
     require("toggleterm").setup(opts)
 
+    -- toggleterm cierra CUALQUIER terminal flotante en WinLeave (ver
+    -- handle_term_leave en toggleterm.lua: `if term:is_float() then
+    -- term:close() end`), así que un simple click afuera (que dispara
+    -- WinLeave al mover el foco) la destruye en vez de solo desenfocarla.
+    -- Se quita ese autocmd puntual del grupo interno del plugin para poder
+    -- clickear afuera, mover el cursor con <C-hjkl>/mouse, etc. sin que se
+    -- cierre; se sigue pudiendo cerrar con <C-\> o :Tf.
+    for _, au in ipairs(vim.api.nvim_get_autocmds({ group = "ToggleTermCommands", event = "WinLeave" })) do
+      vim.api.nvim_del_autocmd(au.id)
+    end
+
+    -- Estado de la flotante: toggleterm no deja arrastrarla con el mouse
+    -- (Neovim no soporta eso en floats), así que se mueve/redimensiona a
+    -- teclado reescribiendo su win_config en cada paso.
+    local float_state = {
+      width = math.floor(vim.o.columns * 0.8),
+      height = math.floor(vim.o.lines * 0.8),
+    }
+    float_state.row = math.floor((vim.o.lines - float_state.height) / 2)
+    float_state.col = math.floor((vim.o.columns - float_state.width) / 2)
+
     local float_term = require("toggleterm.terminal").Terminal:new({
       direction = "float",
       close_on_exit = false,
+      float_opts = {
+        border = "curved",
+        width = float_state.width,
+        height = float_state.height,
+        row = float_state.row,
+        col = float_state.col,
+      },
+      on_open = function(term)
+        local function apply()
+          vim.api.nvim_win_set_config(term.window, {
+            relative = "editor",
+            row = float_state.row,
+            col = float_state.col,
+            width = float_state.width,
+            height = float_state.height,
+          })
+        end
+
+        local function move(drow, dcol)
+          float_state.row = math.max(0, math.min(vim.o.lines - float_state.height - 2, float_state.row + drow))
+          float_state.col = math.max(0, math.min(vim.o.columns - float_state.width, float_state.col + dcol))
+          apply()
+        end
+
+        local function resize(dwidth, dheight)
+          float_state.width = math.max(20, math.min(vim.o.columns, float_state.width + dwidth))
+          float_state.height = math.max(5, math.min(vim.o.lines - 2, float_state.height + dheight))
+          apply()
+        end
+
+        local step = 3
+        local opts = { buffer = term.bufnr }
+        for _, mode in ipairs({ "n", "t" }) do
+          vim.keymap.set(mode, "<A-h>", function() move(0, -step) end, opts)
+          vim.keymap.set(mode, "<A-l>", function() move(0, step) end, opts)
+          vim.keymap.set(mode, "<A-k>", function() move(-step, 0) end, opts)
+          vim.keymap.set(mode, "<A-j>", function() move(step, 0) end, opts)
+          vim.keymap.set(mode, "<A-=>", function() resize(step, step) end, opts)
+          vim.keymap.set(mode, "<A-->", function() resize(-step, -step) end, opts)
+        end
+      end,
     })
 
     vim.api.nvim_create_user_command("Tf", function(cmd_opts)

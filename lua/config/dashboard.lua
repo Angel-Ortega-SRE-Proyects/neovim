@@ -17,9 +17,9 @@ local GROUPS = {
   {
     title = "Git",
     items = {
-      { "<leader>gc", "Historial de commits (con preview)" },
-      { "<leader>gs", "Archivos modificados (git status)" },
-      { "<leader>gb", "Listar branches" },
+      { "<leader>gc  /  :Gc", "Commits — Enter: ver diff del commit, C-o: checkout" },
+      { "<leader>gs  /  :Gs", "Status — Enter: abrir archivo, C-d: ver diff" },
+      { "<leader>gb  /  :Gb", "Listar branches" },
       { "<leader>gd  /  :DiffviewOpen", "Panel de diffs de lo cambiado" },
       { "<leader>gh  /  :DiffviewFileHistory %", "Historial del archivo actual" },
     },

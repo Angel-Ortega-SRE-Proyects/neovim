@@ -70,7 +70,7 @@ return {
         offsets = {
           {
             filetype = "NvimTree",
-            text = "Explorer",
+            text = "  Explorer",
             highlight = "Directory",
             separator = true,
           },

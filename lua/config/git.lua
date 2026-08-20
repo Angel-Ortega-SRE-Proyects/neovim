@@ -34,6 +34,58 @@ function M.branch()
   return branch
 end
 
+--- Picker de commits donde <CR> abre el diff de ese commit en Diffview
+--- (en vez del `checkout` que Telescope hace por defecto, que muta el
+--- working tree sin avisar). <C-o> conserva el checkout por si hace falta.
+function M.open_commits()
+  if not M.in_repo() then
+    vim.notify("No estás dentro de un repositorio git (" .. vim.fn.getcwd() .. ")", vim.log.levels.WARN)
+    return
+  end
+  local actions = require("telescope.actions")
+  local action_state = require("telescope.actions.state")
+  require("telescope.builtin").git_commits({
+    attach_mappings = function(prompt_bufnr, map)
+      local function view_diff()
+        local entry = action_state.get_selected_entry()
+        actions.close(prompt_bufnr)
+        vim.cmd("DiffviewOpen " .. entry.value .. "^!")
+      end
+      map("i", "<CR>", view_diff)
+      map("n", "<CR>", view_diff)
+      map("i", "<C-o>", actions.git_checkout)
+      map("n", "<C-o>", actions.git_checkout)
+      return true
+    end,
+  })
+end
+
+--- Picker de status donde <CR> abre el archivo completo en Diffview (líneas
+--- modificadas marcadas en el gutter, igual que el resto de pickers de git).
+--- <C-e> conserva el open plano de Telescope por si solo quieres editar.
+function M.open_status()
+  if not M.in_repo() then
+    vim.notify("No estás dentro de un repositorio git (" .. vim.fn.getcwd() .. ")", vim.log.levels.WARN)
+    return
+  end
+  local actions = require("telescope.actions")
+  local action_state = require("telescope.actions.state")
+  require("telescope.builtin").git_status({
+    attach_mappings = function(prompt_bufnr, map)
+      local function view_diff()
+        local entry = action_state.get_selected_entry()
+        actions.close(prompt_bufnr)
+        vim.cmd("DiffviewOpen -- " .. entry.value)
+      end
+      map("i", "<CR>", view_diff)
+      map("n", "<CR>", view_diff)
+      map("i", "<C-e>", actions.select_default)
+      map("n", "<C-e>", actions.select_default)
+      return true
+    end,
+  })
+end
+
 function M.start_watch()
   refresh_branch()
   local timer = vim.uv.new_timer()

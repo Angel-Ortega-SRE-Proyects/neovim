@@ -5,7 +5,7 @@ return {
     "nvim-lua/plenary.nvim",
     { "nvim-telescope/telescope-fzf-native.nvim", build = "make" },
   },
-  cmd = "Telescope",
+  cmd = { "Telescope", "Gc", "Gb", "Gs" },
   keys = {
     { "<leader>ff", "<cmd>Telescope find_files<CR>", desc = "Find files" },
     { "<leader>fg", "<cmd>Telescope live_grep<CR>", desc = "Live grep (toda la carpeta actual)" },
@@ -33,9 +33,9 @@ return {
       end,
       desc = "Buscar en UNA carpeta específica",
     },
-    { "<leader>gc", function() require("config.git").guard("Telescope git_commits")() end, desc = "Git commits (historial)" },
+    { "<leader>gc", function() require("config.git").open_commits() end, desc = "Git commits (Enter: ver diff)" },
     { "<leader>gb", function() require("config.git").guard("Telescope git_branches")() end, desc = "Git branches" },
-    { "<leader>gs", function() require("config.git").guard("Telescope git_status")() end, desc = "Git status" },
+    { "<leader>gs", function() require("config.git").open_status() end, desc = "Git status (Enter: diff, C-e: abrir archivo)" },
   },
   config = function()
     local telescope = require("telescope")
@@ -45,5 +45,13 @@ return {
       },
     })
     pcall(telescope.load_extension, "fzf")
+
+    -- Alias de comandos Ex cortos para gc/gs/gb, igual que :DiffviewOpen y
+    -- :DiffviewFileHistory ya cubren gd/gh (ver lua/plugins/diffview.lua).
+    -- Evita el E492 de escribir ":gb" pensando que existe como tal.
+    local git = require("config.git")
+    vim.api.nvim_create_user_command("Gc", git.open_commits, {})
+    vim.api.nvim_create_user_command("Gb", git.guard("Telescope git_branches"), {})
+    vim.api.nvim_create_user_command("Gs", git.open_status, {})
   end,
 }

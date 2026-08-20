@@ -1,10 +1,24 @@
 local map = vim.keymap.set
 
--- Window navigation
-map("n", "<C-h>", "<C-w>h", { desc = "Go to left window" })
-map("n", "<C-j>", "<C-w>j", { desc = "Go to lower window" })
-map("n", "<C-k>", "<C-w>k", { desc = "Go to upper window" })
-map("n", "<C-l>", "<C-w>l", { desc = "Go to right window" })
+-- Window navigation: ver lua/plugins/smart-splits.lua (C-hjkl cruza también
+-- hacia panes de tmux, no solo splits de Neovim).
+
+-- Splits, mismos atajos que ~/.tmux.conf (prefix ahí es C-z, acá <leader>):
+--   . -> split lado a lado, - -> split arriba/abajo, x -> cerrar, z -> zoom
+map("n", "<leader>.", ":vsplit<CR>", { desc = "Split lado a lado" })
+map("n", "<leader>-", ":split<CR>", { desc = "Split arriba/abajo" })
+map("n", "<leader>x", "<C-w>c", { desc = "Cerrar split actual" })
+
+local zoomed = false
+map("n", "<leader>z", function()
+  if zoomed then
+    vim.cmd("wincmd =")
+  else
+    vim.cmd("wincmd |")
+    vim.cmd("wincmd _")
+  end
+  zoomed = not zoomed
+end, { desc = "Zoom split actual (toggle)" })
 
 -- Buffers
 map("n", "<S-h>", ":bprevious<CR>", { desc = "Prev buffer" })
