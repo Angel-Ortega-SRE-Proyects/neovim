@@ -1,0 +1,12 @@
+-- Recuerda los buffers abiertos por directorio (cwd), para no tener que
+-- volver a abrir todo a mano al retomar un proyecto.
+return {
+  "folke/persistence.nvim",
+  event = "BufReadPre",
+  opts = {},
+  keys = {
+    { "<leader>Ss", function() require("persistence").load() end, desc = "Restaurar sesión (carpeta actual)" },
+    { "<leader>Sl", function() require("persistence").load({ last = true }) end, desc = "Restaurar última sesión" },
+    { "<leader>Sd", function() require("persistence").stop() end, desc = "No guardar la sesión actual al salir" },
+  },
+}

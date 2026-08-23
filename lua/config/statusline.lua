@@ -88,18 +88,21 @@ function M.render()
   return string.format(" %s%%=%s ", left, right)
 end
 
--- Un color por sección para distinguir cada dato de un vistazo. Se reaplica
--- en cada ColorScheme porque cambiar de tema borra los highlights custom.
+-- Un color por sección para distinguir cada dato de un vistazo. Paleta
+-- centralizada en lua/config/theme.lua (la misma que usan dashboard.lua y
+-- explorer.lua). Se reaplica en cada ColorScheme porque cambiar de tema
+-- borra los highlights custom.
+local colors = require("config.theme").colors
 local function set_highlights()
-  vim.api.nvim_set_hl(0, "StatuslineGitBranch", { fg = "#e0af68", bold = true })
-  vim.api.nvim_set_hl(0, "StatuslineError", { fg = "#f7768e", bold = true })
-  vim.api.nvim_set_hl(0, "StatuslineWarn", { fg = "#ff9e64", bold = true })
-  vim.api.nvim_set_hl(0, "StatuslineCpu", { fg = "#7dcfff" })
-  vim.api.nvim_set_hl(0, "StatuslineMem", { fg = "#bb9af7" })
-  vim.api.nvim_set_hl(0, "StatuslineDisk", { fg = "#9ece6a" })
-  vim.api.nvim_set_hl(0, "StatuslineNet", { fg = "#7aa2f7" })
-  vim.api.nvim_set_hl(0, "StatuslinePos", { fg = "#c0caf5" })
-  vim.api.nvim_set_hl(0, "StatuslineDim", { fg = "#9aa5ce" })
+  vim.api.nvim_set_hl(0, "StatuslineGitBranch", { fg = colors.brown, bold = true })
+  vim.api.nvim_set_hl(0, "StatuslineError", { fg = colors.error, bold = true })
+  vim.api.nvim_set_hl(0, "StatuslineWarn", { fg = colors.warn, bold = true })
+  vim.api.nvim_set_hl(0, "StatuslineCpu", { fg = colors.green })
+  vim.api.nvim_set_hl(0, "StatuslineMem", { fg = colors.tan })
+  vim.api.nvim_set_hl(0, "StatuslineDisk", { fg = colors.green })
+  vim.api.nvim_set_hl(0, "StatuslineNet", { fg = colors.green_dim })
+  vim.api.nvim_set_hl(0, "StatuslinePos", { fg = colors.fg })
+  vim.api.nvim_set_hl(0, "StatuslineDim", { fg = colors.green_dim })
 end
 
 function M.setup()

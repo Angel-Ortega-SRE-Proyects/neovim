@@ -1,7 +1,11 @@
 local ensure_installed = {
   "lua", "vim", "vimdoc", "query",
   "bash", "markdown", "markdown_inline",
-  "json", "yaml",
+  -- YAML/JSON + devops
+  "json", "yaml", "toml", "hcl", "dockerfile", "gitignore",
+  -- Lenguajes de propósito general
+  "python", "javascript", "typescript", "tsx", "go", "gomod", "gowork",
+  "java", "c_sharp",
 }
 
 return {

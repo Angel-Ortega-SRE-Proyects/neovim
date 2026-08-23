@@ -1,8 +1,15 @@
--- Uso de CPU / memoria / disco / red, leído de /proc y refrescado en segundo
--- plano. Se usa como componente de lualine (barra inferior). Personalizable:
--- cambia el intervalo o el formato de M.status() a tu gusto.
+-- Uso de CPU / memoria / disco / red, refrescado en segundo plano. Se usa
+-- como componente de lualine (barra inferior). Personalizable: cambia el
+-- intervalo o el formato de M.status() a tu gusto.
 -- CPU se muestra en %; memoria y disco en GB usados/total; red en KB/s o MB/s.
+--
+-- Linux lee /proc (rápido, sin spawnear procesos); macOS no tiene /proc,
+-- así que ahí se apoya en top/vm_stat/sysctl/netstat vía vim.system (async,
+-- igual que ya hacía read_disk con `df`) — un poco más caro pero corre en
+-- un timer de fondo, no bloquea la UI.
 local M = {}
+
+local is_mac = vim.uv.os_uname().sysname == "Darwin"
 
 local cpu_pct = 0
 local mem_used_gb, mem_total_gb = 0, 0
@@ -13,7 +20,7 @@ local prev_idle, prev_total = 0, 0
 local prev_rx, prev_tx = nil, nil
 local prev_net_time = nil
 
-local function read_cpu()
+local function read_cpu_linux()
   local f = io.open("/proc/stat", "r")
   if not f then
     return
@@ -43,7 +50,21 @@ local function read_cpu()
   prev_idle, prev_total = idle, total
 end
 
-local function read_mem()
+-- `top -l 1 -n 0` imprime una línea "CPU usage: X% user, Y% sys, Z% idle"
+-- y sale; no hay /proc en macOS para leerlo directo de un archivo.
+local function read_cpu_mac()
+  vim.system({ "top", "-l", "1", "-n", "0" }, { text = true }, function(res)
+    if res.code ~= 0 or not res.stdout then
+      return
+    end
+    local idle = res.stdout:match("(%d+%.?%d*)%%%s*idle")
+    if idle then
+      cpu_pct = math.floor((100 - tonumber(idle)) + 0.5)
+    end
+  end)
+end
+
+local function read_mem_linux()
   local f = io.open("/proc/meminfo", "r")
   if not f then
     return
@@ -68,20 +89,66 @@ local function read_mem()
   end
 end
 
-local function read_disk()
-  vim.system({ "df", "--output=used,size", "--block-size=1K", "/" }, { text = true }, function(res)
+-- Sin /proc/meminfo: memoria total vía sysctl, páginas libres/inactivas
+-- vía vm_stat (en páginas de 4KiB) para aproximar lo "usado".
+local function read_mem_mac()
+  vim.system({ "sh", "-c", "sysctl -n hw.memsize; vm_stat" }, { text = true }, function(res)
     if res.code ~= 0 or not res.stdout then
       return
     end
-    local used, size = res.stdout:match("(%d+)%s+(%d+)%s*\n?%s*$")
-    if used and size then
-      disk_used_gb = tonumber(used) / 1024 / 1024
-      disk_total_gb = tonumber(size) / 1024 / 1024
+    local total_bytes = tonumber(res.stdout:match("^(%d+)"))
+    local page_size = tonumber(res.stdout:match("page size of (%d+) bytes")) or 4096
+    local free_pages = tonumber(res.stdout:match("Pages free:%s*(%d+)")) or 0
+    local inactive_pages = tonumber(res.stdout:match("Pages inactive:%s*(%d+)")) or 0
+    if total_bytes and total_bytes > 0 then
+      local avail_bytes = (free_pages + inactive_pages) * page_size
+      mem_total_gb = total_bytes / 1024 / 1024 / 1024
+      mem_used_gb = (total_bytes - avail_bytes) / 1024 / 1024 / 1024
     end
   end)
 end
 
-local function read_net()
+-- `df -k /` (bloques de 1K) es el único flag común entre GNU df (Linux) y
+-- BSD df (macOS) — a diferencia de `--output=`/`--block-size=`, que son
+-- solo de GNU.
+local function read_disk()
+  vim.system({ "df", "-k", "/" }, { text = true }, function(res)
+    if res.code ~= 0 or not res.stdout then
+      return
+    end
+    local data_line = res.stdout:match("\n(.-)\n?$")
+    if not data_line then
+      return
+    end
+    -- Columnas por posición, NO por "sacar los números de la línea": el
+    -- nombre del dispositivo (/dev/sda3, /dev/nvme0n1p2) suele traer
+    -- dígitos propios que arruinarían un gmatch("%d+") genérico.
+    local cols = {}
+    for tok in data_line:gmatch("%S+") do
+      table.insert(cols, tok)
+    end
+    -- Filesystem 1K-blocks Used Available Use% Mounted-on (GNU y BSD)
+    local size, used = tonumber(cols[2]), tonumber(cols[3])
+    if used and size then
+      disk_used_gb = used / 1024 / 1024
+      disk_total_gb = size / 1024 / 1024
+    end
+  end)
+end
+
+local function apply_net_rate(rx, tx)
+  local now = vim.uv.hrtime() / 1e9
+  if prev_rx and prev_tx and prev_net_time then
+    local dt = now - prev_net_time
+    if dt > 0 then
+      net_rx_rate = math.max(0, (rx - prev_rx) / dt)
+      net_tx_rate = math.max(0, (tx - prev_tx) / dt)
+    end
+  end
+  prev_rx, prev_tx, prev_net_time = rx, tx, now
+end
+
+local function read_net_linux()
   local f = io.open("/proc/net/dev", "r")
   if not f then
     return
@@ -99,17 +166,41 @@ local function read_net()
     end
   end
   f:close()
-
-  local now = vim.uv.hrtime() / 1e9
-  if prev_rx and prev_tx and prev_net_time then
-    local dt = now - prev_net_time
-    if dt > 0 then
-      net_rx_rate = math.max(0, (rx - prev_rx) / dt)
-      net_tx_rate = math.max(0, (tx - prev_tx) / dt)
-    end
-  end
-  prev_rx, prev_tx, prev_net_time = rx, tx, now
+  apply_net_rate(rx, tx)
 end
+
+-- `netstat -ib` repite cada interfaz por familia de dirección (Link/inet/
+-- inet6); se cuenta solo la primera fila de cada una para no duplicar.
+local function read_net_mac()
+  vim.system({ "netstat", "-ib" }, { text = true }, function(res)
+    if res.code ~= 0 or not res.stdout then
+      return
+    end
+    local rx, tx = 0, 0
+    local seen = {}
+    for line in res.stdout:gmatch("[^\n]+") do
+      local iface = line:match("^(%S+)")
+      if iface and iface ~= "lo0" and not seen[iface] then
+        local cols = {}
+        for col in line:gmatch("%S+") do
+          table.insert(cols, col)
+        end
+        -- Name Mtu Network Address Ipkts Ierrs Ibytes Opkts Oerrs Obytes Coll
+        local ibytes, obytes = tonumber(cols[7]), tonumber(cols[10])
+        if ibytes and obytes then
+          seen[iface] = true
+          rx = rx + ibytes
+          tx = tx + obytes
+        end
+      end
+    end
+    apply_net_rate(rx, tx)
+  end)
+end
+
+local read_cpu = is_mac and read_cpu_mac or read_cpu_linux
+local read_mem = is_mac and read_mem_mac or read_mem_linux
+local read_net = is_mac and read_net_mac or read_net_linux
 
 local function tick()
   read_cpu()

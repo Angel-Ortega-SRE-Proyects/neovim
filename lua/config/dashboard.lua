@@ -1,6 +1,8 @@
--- Reemplaza el buffer [No Name] inicial (solo cuando abres `nvim` sin
--- argumentos) por una vista de los comandos disponibles: nombre + qué hace
--- cada uno, agrupados por categoría. Edita GROUPS para mantenerla al día.
+-- Vista de comandos disponibles: nombre + qué hace cada uno, agrupados por
+-- categoría. Antes reemplazaba el buffer [No Name] inicial; ahora esa
+-- pantalla de inicio la da snacks.nvim (ver lua/plugins/dashboard.lua) con
+-- logo + botones estilo LazyVim, así que esto queda como :Commands para
+-- consultarlo cuando quieras. Edita GROUPS para mantenerla al día.
 local M = {}
 
 local GROUPS = {
@@ -107,26 +109,19 @@ local function build_lines()
   return lines
 end
 
-function M.setup()
-  vim.api.nvim_create_autocmd("VimEnter", {
-    group = vim.api.nvim_create_augroup("CommandsDashboard", { clear = true }),
-    callback = function()
-      if vim.fn.argc() ~= 0 then
-        return
-      end
-      local buf = vim.api.nvim_get_current_buf()
-      if vim.bo[buf].buftype ~= "" or vim.fn.bufname(buf) ~= "" then
-        return
-      end
+local function open()
+  vim.cmd("enew")
+  local buf = vim.api.nvim_get_current_buf()
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, build_lines())
+  vim.bo[buf].buftype = "nofile"
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].swapfile = false
+  vim.bo[buf].modifiable = false
+  vim.bo[buf].filetype = "commandsdashboard"
+end
 
-      vim.api.nvim_buf_set_lines(buf, 0, -1, false, build_lines())
-      vim.bo[buf].buftype = "nofile"
-      vim.bo[buf].bufhidden = "wipe"
-      vim.bo[buf].swapfile = false
-      vim.bo[buf].modifiable = false
-      vim.bo[buf].filetype = "commandsdashboard"
-    end,
-  })
+function M.setup()
+  vim.api.nvim_create_user_command("Commands", open, { desc = "Ver comandos y atajos custom agrupados por categoría" })
 end
 
 return M

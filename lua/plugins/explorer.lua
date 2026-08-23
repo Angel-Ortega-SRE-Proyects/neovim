@@ -10,32 +10,50 @@ return {
     { "<leader>o", "<cmd>NvimTreeFocus<CR>", desc = "Focus file explorer" },
   },
   init = function()
-    -- Abre el explorador automáticamente al iniciar (como el Explorer de VSCode)
+    -- El explorador arranca CERRADO por defecto (ni con `nvim`, ni con
+    -- `nvim <carpeta>`) — se abre a mano con <leader>e/<leader>o, o desde
+    -- el botón "e" del dashboard. Con `nvim <carpeta>` sí cambia el cwd
+    -- a esa carpeta, para que quede lista si después abrís el árbol.
     vim.api.nvim_create_autocmd("VimEnter", {
       group = vim.api.nvim_create_augroup("NvimTreeAutoOpen", { clear = true }),
       callback = function(data)
-        local directory = vim.fn.isdirectory(data.file) == 1
+        local directory = data.file ~= "" and vim.fn.isdirectory(data.file) == 1
         if directory then
           vim.cmd.cd(data.file)
         end
-        require("nvim-tree.api").tree.open()
       end,
     })
 
     -- Color propio para las carpetas (cerradas, abiertas, vacías) en vez del
-    -- gris apagado por defecto. Se reaplica al cambiar de colorscheme.
+    -- azul/gris por defecto. Paleta centralizada en lua/config/theme.lua
+    -- (la misma que usan dashboard.lua y statusline.lua). Se reaplica al
+    -- cambiar de colorscheme.
+    local colors = require("config.theme").colors
     local function set_highlights()
-      vim.api.nvim_set_hl(0, "NvimTreeFolderIcon", { fg = "#7aa2f7" })
-      vim.api.nvim_set_hl(0, "NvimTreeFolderName", { fg = "#c0caf5" })
-      vim.api.nvim_set_hl(0, "NvimTreeOpenedFolderName", { fg = "#7dcfff", bold = true })
-      vim.api.nvim_set_hl(0, "NvimTreeEmptyFolderName", { fg = "#565f89", italic = true })
-      vim.api.nvim_set_hl(0, "NvimTreeIndentMarker", { fg = "#3b4261" })
+      vim.api.nvim_set_hl(0, "NvimTreeFolderIcon", { fg = colors.green })
+      vim.api.nvim_set_hl(0, "NvimTreeFolderName", { fg = colors.tan })
+      vim.api.nvim_set_hl(0, "NvimTreeOpenedFolderName", { fg = colors.green_bright, bold = true })
+      vim.api.nvim_set_hl(0, "NvimTreeEmptyFolderName", { fg = colors.green_dim, italic = true })
+      vim.api.nvim_set_hl(0, "NvimTreeIndentMarker", { fg = colors.brown })
     end
     set_highlights()
     vim.api.nvim_create_autocmd("ColorScheme", {
       group = vim.api.nvim_create_augroup("NvimTreeHighlights", { clear = true }),
       callback = set_highlights,
     })
+
+    -- Línea separadora entre el título "Explorer" (lo dibuja bufferline
+    -- sobre el tabline, ver lua/plugins/editor.lua) y el listado de
+    -- archivos: un winbar propio de la ventana del árbol, que se ubica
+    -- justo debajo del tabline y arriba del contenido del buffer. Se pone
+    -- en el evento TreeOpen (no FileType: ese dispara mientras nvim-tree
+    -- todavía está armando la ventana y bufwinid() puede devolver -1).
+    require("nvim-tree.api").events.subscribe("TreeOpen", function()
+      local win = require("nvim-tree.api").tree.winid()
+      if win and win ~= -1 then
+        vim.wo[win].winbar = "%#NvimTreeWinSeparator#" .. string.rep("─", 200)
+      end
+    end)
   end,
   opts = {
     -- Sin esto, el árbol ignora los :cd (incluido el que dispara la

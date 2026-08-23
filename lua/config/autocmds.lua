@@ -67,46 +67,19 @@ autocmd("FileType", {
 })
 
 -- Terminal <-> Neovim/Explorer cwd sync, para cualquier buffer de terminal
--- (:Tf flotante de toggleterm, :Term como pestaña, o un :terminal a pelo).
+-- (:Term como pestaña, o un :terminal a pelo — :Tb es un pane de tmux
+-- real, no un buffer de Neovim, así que no le aplica esto).
 --
 -- Evita "nvim dentro de nvim dentro de nvim": si dentro de una terminal
 -- integrada escribes `nvim <algo>`, en vez de abrir un Neovim anidado,
 -- reutiliza ESTA instancia (usa $NVIM, que Neovim ya exporta a sus
 -- terminales) — si es la misma carpeta no hace nada (solo avisa), si es
 -- otra o un archivo, se lo manda a la instancia ya abierta.
-local NVIM_GUARD = table.concat({
-  [[nvim() {]],
-  [[  if [ -z "$NVIM" ]; then command nvim "$@"; return; fi]],
-  [[  if [ $# -eq 0 ]; then set -- "$PWD"; fi]],
-  [[  case "$1" in -*) command nvim "$@"; return;; esac]],
-  [[  local target; target=$(realpath -m "$1" 2>/dev/null || echo "$1")]],
-  [[  local vq; vq=$(printf '%s' "$target" | sed "s/'/''/g")]],
-  [[  local cur; cur=$(timeout 2 command nvim --headless --server "$NVIM" --remote-expr 'getcwd()' 2>/dev/null)]],
-  [[  if [ -d "$target" ]; then]],
-  [[    if [ "$target" = "$cur" ]; then]],
-  [[      echo "Ya tienes esta carpeta abierta en Neovim: $target"]],
-  [[    else]],
-  [[      timeout 2 command nvim --headless --server "$NVIM" --remote-expr "execute('cd ' . fnameescape('$vq'))" >/dev/null 2>&1]],
-  [[      echo "Neovim ya abierto -> cambie cwd a: $target"]],
-  [[    fi]],
-  [[  else]],
-  [[    timeout 2 command nvim --headless --server "$NVIM" --remote-expr "execute('edit ' . fnameescape('$vq'))" >/dev/null 2>&1]],
-  [[    echo "Abri $target en el Neovim que ya tenias abierto."]],
-  [[  fi]],
-  [[}]],
-}, "\n")
-
-autocmd("TermOpen", {
-  group = augroup("TermOsc7Hook", { clear = true }),
-  callback = function(args)
-    vim.defer_fn(function()
-      local job = vim.b[args.buf].terminal_job_id
-      if job then
-        vim.fn.chansend(job, NVIM_GUARD .. "\n")
-      end
-    end, 50)
-  end,
-})
+--
+-- La función vive en ~/.bashrc.d/nvim-remote.sh y se carga sola en
+-- cualquier shell interactiva; antes se re-inyectaba acá vía chansend en
+-- cada TermOpen como respaldo, pero eso hacía que se "tipeara" sola y
+-- visible cada vez que se abría una terminal — ya no hace falta.
 
 -- El gutter de números (sobre todo relativenumber, que cambia de ancho) y el
 -- signcolumn desalinean dónde Neovim dibuja el cursor real de la terminal

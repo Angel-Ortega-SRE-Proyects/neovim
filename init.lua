@@ -11,6 +11,7 @@ vim.g.loaded_tarPlugin = 1
 
 require("config.options")
 require("config.keymaps")
+require("config.cheatsheet").setup()
 require("config.autocmds")
 require("config.dashboard").setup()
 require("config.statusline").setup()

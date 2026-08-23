@@ -1,24 +1,22 @@
--- Terminales integradas, sincronizadas en ambas direcciones con el cwd de
--- Neovim (y por lo tanto con el explorador, que sigue al cwd) — ver
+-- Terminales, sincronizadas en ambas direcciones con el cwd de Neovim (y
+-- por lo tanto con el explorador, que sigue al cwd) — ver
 -- lua/config/autocmds.lua para el mecanismo de sincronización (OSC 7).
 --
---   :Tf      terminal flotante (ventana encima, para comandos rápidos)
 --   :Term    terminal como pestaña normal (buffer en el área de edición,
---            aparece en la barra de buffers igual que un archivo)
---   :Tb      terminal como panel inferior (franja delgada pegada abajo,
---            estilo VSCode) — para moverte, crear/borrar archivos y
---            carpetas (cd, ls, mkdir, touch, rm, mv, etc.) sin perder de
---            vista el editor
+--            aparece en la barra de buffers igual que un archivo) — vive
+--            y muere con Neovim, es una terminal interna.
+--   :Tb      pane de tmux REAL, dividido debajo del pane donde corre
+--            Neovim (requiere estar dentro de una sesión de tmux). No es
+--            una terminal de Neovim: es un pane hermano, así que sigue
+--            vivo aunque cierres/crashee Neovim, y se navega a él con los
+--            mismos <C-hjkl> de smart-splits.nvim (multiplexer_integration
+--            = "tmux"), no con un atajo aparte.
 --
 -- Uso:
---   <C-\>          toggle terminal flotante
---   <leader>tf       toggle terminal flotante
---   (dentro de la flotante) A-hjkl mueve, A-=/A-- redimensiona
 --   <leader>tt       abrir/enfocar terminal en pestaña
---   <leader>tb       toggle terminal panel inferior
---   :Tf ls -la       abre la flotante y ejecuta ese comando
---   :Term ls -la      abre la pestaña y ejecuta ese comando
---   :Tb ls -la       abre el panel inferior y ejecuta ese comando
+--   <leader>tb       abrir/enfocar el pane de tmux de abajo
+--   :Term ls -la     abre la pestaña y ejecuta ese comando
+--   :Tb ls -la       abre el pane de tmux y ejecuta ese comando
 local term_bufnr = nil
 
 local function open_tab_terminal(args)
@@ -50,6 +48,43 @@ vim.api.nvim_create_user_command("Term", function(cmd_opts)
   open_tab_terminal(cmd_opts.args)
 end, { nargs = "*", desc = "Terminal como pestaña (opcional: comando a ejecutar)" })
 
+-- :Tb -> pane de tmux real abajo (no una terminal interna de Neovim). Se
+-- guarda el pane_id la primera vez; si ya existe se reusa/enfoca en vez de
+-- crear otro, y si lo cerraste desde tmux (list-panes ya no lo tiene) se
+-- vuelve a crear.
+local tmux_bottom_pane_id = nil
+
+local function tmux_pane_exists(id)
+  if not id then
+    return false
+  end
+  local panes = vim.fn.system({ "tmux", "list-panes", "-a", "-F", "#{pane_id}" })
+  return panes:find(id, 1, true) ~= nil
+end
+
+vim.api.nvim_create_user_command("Tb", function(cmd_opts)
+  if vim.env.TMUX == nil then
+    vim.notify("Tb necesita Neovim corriendo dentro de una sesión de tmux", vim.log.levels.WARN)
+    return
+  end
+
+  if not tmux_pane_exists(tmux_bottom_pane_id) then
+    local out = vim.fn.system({
+      "tmux", "split-window", "-v", "-l", "12",
+      "-c", vim.fn.getcwd(), "-P", "-F", "#{pane_id}",
+    })
+    tmux_bottom_pane_id = vim.trim(out)
+  else
+    vim.fn.system({ "tmux", "select-pane", "-t", tmux_bottom_pane_id })
+  end
+
+  if cmd_opts.args ~= "" then
+    vim.fn.system({ "tmux", "send-keys", "-t", tmux_bottom_pane_id, cmd_opts.args, "Enter" })
+  end
+end, { nargs = "*", desc = "Pane de tmux real abajo (opcional: comando a ejecutar)" })
+
+vim.keymap.set("n", "<leader>tb", "<cmd>Tb<CR>", { desc = "Terminal: pane de tmux (abajo)" })
+
 -- :Sys -> monitor de recursos a pantalla completa (top) en ventana flotante.
 vim.api.nvim_create_user_command("Sys", function()
   local width = math.floor(vim.o.columns * 0.85)
@@ -78,134 +113,6 @@ end, { desc = "Monitor de CPU/memoria a pantalla completa" })
 
 vim.keymap.set("n", "<leader>ts", "<cmd>Sys<CR>", { desc = "System monitor (top)" })
 
-return {
-  "akinsho/toggleterm.nvim",
-  version = "*",
-  event = "VeryLazy",
-  keys = {
-    { "<C-\\>", "<cmd>Tf<CR>", desc = "Toggle terminal (flotante)", mode = { "n", "t" } },
-    { "<leader>tf", "<cmd>Tf<CR>", desc = "Floating terminal" },
-    { "<leader>tt", "<cmd>Term<CR>", desc = "Terminal en pestaña" },
-    { "<leader>tb", "<cmd>Tb<CR>", desc = "Terminal panel inferior", mode = { "n", "t" } },
-  },
-  opts = {
-    close_on_exit = true,
-    float_opts = { border = "curved" },
-  },
-  config = function(_, opts)
-    require("toggleterm").setup(opts)
+vim.keymap.set("n", "<leader>tt", "<cmd>Term<CR>", { desc = "Terminal en pestaña" })
 
-    -- toggleterm cierra CUALQUIER terminal flotante en WinLeave (ver
-    -- handle_term_leave en toggleterm.lua: `if term:is_float() then
-    -- term:close() end`), así que un simple click afuera (que dispara
-    -- WinLeave al mover el foco) la destruye en vez de solo desenfocarla.
-    -- Se quita ese autocmd puntual del grupo interno del plugin para poder
-    -- clickear afuera, mover el cursor con <C-hjkl>/mouse, etc. sin que se
-    -- cierre; se sigue pudiendo cerrar con <C-\> o :Tf.
-    for _, au in ipairs(vim.api.nvim_get_autocmds({ group = "ToggleTermCommands", event = "WinLeave" })) do
-      vim.api.nvim_del_autocmd(au.id)
-    end
-
-    -- Estado de la flotante: toggleterm no deja arrastrarla con el mouse
-    -- (Neovim no soporta eso en floats), así que se mueve/redimensiona a
-    -- teclado reescribiendo su win_config en cada paso.
-    local float_state = {
-      width = math.floor(vim.o.columns * 0.8),
-      height = math.floor(vim.o.lines * 0.8),
-    }
-    float_state.row = math.floor((vim.o.lines - float_state.height) / 2)
-    float_state.col = math.floor((vim.o.columns - float_state.width) / 2)
-
-    local float_term = require("toggleterm.terminal").Terminal:new({
-      direction = "float",
-      close_on_exit = false,
-      float_opts = {
-        border = "curved",
-        width = float_state.width,
-        height = float_state.height,
-        row = float_state.row,
-        col = float_state.col,
-      },
-      on_open = function(term)
-        local function apply()
-          vim.api.nvim_win_set_config(term.window, {
-            relative = "editor",
-            row = float_state.row,
-            col = float_state.col,
-            width = float_state.width,
-            height = float_state.height,
-          })
-        end
-
-        local function move(drow, dcol)
-          float_state.row = math.max(0, math.min(vim.o.lines - float_state.height - 2, float_state.row + drow))
-          float_state.col = math.max(0, math.min(vim.o.columns - float_state.width, float_state.col + dcol))
-          apply()
-        end
-
-        local function resize(dwidth, dheight)
-          float_state.width = math.max(20, math.min(vim.o.columns, float_state.width + dwidth))
-          float_state.height = math.max(5, math.min(vim.o.lines - 2, float_state.height + dheight))
-          apply()
-        end
-
-        local step = 3
-        local opts = { buffer = term.bufnr }
-        for _, mode in ipairs({ "n", "t" }) do
-          vim.keymap.set(mode, "<A-h>", function() move(0, -step) end, opts)
-          vim.keymap.set(mode, "<A-l>", function() move(0, step) end, opts)
-          vim.keymap.set(mode, "<A-k>", function() move(-step, 0) end, opts)
-          vim.keymap.set(mode, "<A-j>", function() move(step, 0) end, opts)
-          vim.keymap.set(mode, "<A-=>", function() resize(step, step) end, opts)
-          vim.keymap.set(mode, "<A-->", function() resize(-step, -step) end, opts)
-        end
-      end,
-    })
-
-    vim.api.nvim_create_user_command("Tf", function(cmd_opts)
-      if cmd_opts.args ~= "" then
-        float_term:open()
-        vim.defer_fn(function()
-          float_term:send(cmd_opts.args, false)
-        end, 50)
-      else
-        float_term:toggle()
-      end
-    end, { nargs = "*", desc = "Floating terminal (opcional: comando a ejecutar)" })
-
-    -- Título con ícono para el panel inferior, ya que a diferencia de la
-    -- flotante (que tiene borde+title propio) un split horizontal no
-    -- muestra nada por defecto. Se reaplica al cambiar de colorscheme.
-    local function set_term_highlights()
-      vim.api.nvim_set_hl(0, "ToggletermTitle", { fg = "#7dcfff", bold = true })
-    end
-    set_term_highlights()
-    vim.api.nvim_create_autocmd("ColorScheme", {
-      group = vim.api.nvim_create_augroup("ToggletermTitleHl", { clear = true }),
-      callback = set_term_highlights,
-    })
-
-    -- Panel inferior: franja horizontal delgada pegada al fondo (estilo
-    -- VSCode), para navegar y hacer operaciones básicas de archivos
-    -- (cd, ls, mkdir, touch, rm, mv, cp) sin taparte todo el editor.
-    local bottom_term = require("toggleterm.terminal").Terminal:new({
-      direction = "horizontal",
-      size = 12,
-      close_on_exit = false,
-      on_open = function(term)
-        vim.wo[term.window].winbar = "%#ToggletermTitle#  bash · panel inferior%#StatusLine#"
-      end,
-    })
-
-    vim.api.nvim_create_user_command("Tb", function(cmd_opts)
-      if cmd_opts.args ~= "" then
-        bottom_term:open()
-        vim.defer_fn(function()
-          bottom_term:send(cmd_opts.args, false)
-        end, 50)
-      else
-        bottom_term:toggle()
-      end
-    end, { nargs = "*", desc = "Terminal panel inferior (opcional: comando a ejecutar)" })
-  end,
-}
+return {}

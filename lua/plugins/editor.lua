@@ -16,9 +16,11 @@ return {
     config = function(_, opts)
       require("gitsigns").setup(opts)
 
+      local colors = require("config.theme").colors
       local function set_highlights()
         -- Texto del blame: tenue e itálico para no competir con el código.
-        vim.api.nvim_set_hl(0, "GitSignsCurrentLineBlame", { fg = "#565f89", italic = true })
+        -- Paleta centralizada en lua/config/theme.lua.
+        vim.api.nvim_set_hl(0, "GitSignsCurrentLineBlame", { fg = colors.green_dim, italic = true })
       end
       set_highlights()
       vim.api.nvim_create_autocmd("ColorScheme", {
@@ -71,6 +73,7 @@ return {
           {
             filetype = "NvimTree",
             text = "  Explorer",
+            text_align = "left",
             highlight = "Directory",
             separator = true,
           },
