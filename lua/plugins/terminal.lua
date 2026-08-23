@@ -69,8 +69,12 @@ vim.api.nvim_create_user_command("Tb", function(cmd_opts)
   end
 
   if not tmux_pane_exists(tmux_bottom_pane_id) then
+    -- "-t" fijo al pane de Neovim: si el foco quedó en otro pane creado por
+    -- ai_cli.lua, un split sin "-t" se intenta partir DENTRO de ese pane
+    -- chico y falla en silencio.
     local out = vim.fn.system({
       "tmux", "split-window", "-v", "-l", "12",
+      "-t", vim.env.TMUX_PANE,
       "-c", vim.fn.getcwd(), "-P", "-F", "#{pane_id}",
     })
     tmux_bottom_pane_id = vim.trim(out)

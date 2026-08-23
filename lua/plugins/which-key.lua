@@ -13,6 +13,7 @@ return {
     local wk = require("which-key")
     wk.setup(opts)
     wk.add({
+      { "<leader>a", group = "AI CLI (Claude/Codex/OpenCode)" },
       { "<leader>f", group = "Find (telescope)" },
       { "<leader>g", group = "Git" },
       { "<leader>h", group = "Git hunk (gitsigns)" },
