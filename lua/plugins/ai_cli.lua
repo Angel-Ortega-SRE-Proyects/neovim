@@ -13,6 +13,8 @@
 --   <leader>ax   Mostrar/ocultar Codex
 --   <leader>ao   Mostrar/ocultar OpenCode
 --   <leader>ag   Mostrar/ocultar Gemini
+--   <leader>aC   Mostrar/ocultar GitHub Copilot CLI (:CopilotCli -- "Copilot"
+--                a secas ya lo usa zbirenbaum/copilot.lua, la ghost-text)
 --   q  (dentro del flotante, en modo normal)   también lo oculta
 --   Alt-q / Alt-d / Alt-k   ocultar/diff/matar SIN salir del modo terminal
 --      -- ojo con <C-d> "pelado": eso NO lo intercepta Neovim, se lo manda
@@ -56,6 +58,7 @@ local AGENTS = {
   { name = "Codex", cmd = "codex" },
   { name = "OpenCode", cmd = "opencode" },
   { name = "Gemini", cmd = "gemini" },
+  { name = "Copilot", cmd = "copilot" },
 }
 
 local state = {} -- name -> { buf, win }
@@ -442,6 +445,12 @@ vim.api.nvim_create_user_command("OpenCode", tool_command("OpenCode", "opencode"
 vim.api.nvim_create_user_command("Gemini", tool_command("Gemini", "gemini"),
   { nargs = "*", bang = true, desc = "Mostrar/ocultar Gemini (! = nueva instancia)" })
 
+-- "CopilotCli", no "Copilot" -- ese nombre ya lo usa zbirenbaum/copilot.lua
+-- (:Copilot auth/status/panel, el de la sugerencia ghost-text) y pisarlo
+-- rompería ese comando.
+vim.api.nvim_create_user_command("CopilotCli", tool_command("Copilot", "copilot"),
+  { nargs = "*", bang = true, desc = "Mostrar/ocultar GitHub Copilot CLI (! = nueva instancia)" })
+
 vim.api.nvim_create_user_command("Agents", open_agents_picker, { desc = "Picker de sesiones de IA activas" })
 
 vim.api.nvim_create_user_command("AgentDiff", function(cmd_opts)
@@ -476,6 +485,7 @@ vim.keymap.set("n", "<leader>ac", "<cmd>Claude<CR>", { desc = "Claude Code (togg
 vim.keymap.set("n", "<leader>ax", "<cmd>Codex<CR>", { desc = "Codex CLI (toggle)" })
 vim.keymap.set("n", "<leader>ao", "<cmd>OpenCode<CR>", { desc = "OpenCode CLI (toggle)" })
 vim.keymap.set("n", "<leader>ag", "<cmd>Gemini<CR>", { desc = "Gemini (toggle)" })
+vim.keymap.set("n", "<leader>aC", "<cmd>CopilotCli<CR>", { desc = "GitHub Copilot CLI (toggle)" })
 vim.keymap.set("n", "<leader>aa", open_agents_picker, { desc = "Modo agentes (picker de sesiones)" })
 vim.keymap.set("n", "<leader>ad", "<cmd>AgentDiff<CR>", { desc = "Ver diff del agente actual" })
 vim.keymap.set("n", "<leader>ak", "<cmd>AgentKill<CR>", { desc = "Matar el agente actual" })
@@ -488,6 +498,7 @@ vim.cmd("cnoreabbrev claude Claude")
 vim.cmd("cnoreabbrev codex Codex")
 vim.cmd("cnoreabbrev opencode OpenCode")
 vim.cmd("cnoreabbrev gemini Gemini")
+vim.cmd("cnoreabbrev copilotcli CopilotCli")
 vim.cmd("cnoreabbrev agents Agents")
 vim.cmd("cnoreabbrev agentdiff AgentDiff")
 vim.cmd("cnoreabbrev agentkill AgentKill")

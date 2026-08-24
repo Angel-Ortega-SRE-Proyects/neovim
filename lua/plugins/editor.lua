@@ -85,6 +85,38 @@ return {
         -- :redrawtabline cada 2s (mismo patrón que el redrawstatus de
         -- statusline.lua para el indicador de agentes).
         custom_areas = {
+          -- Tokens usados (y costo aproximado) por la sesión ACTIVA de cada
+          -- agente de IA en esta carpeta -- lua/config/agent_usage.lua hace
+          -- el parseo real (JSONL/sqlite de cada CLI) en segundo plano.
+          left = function()
+            local colors = require("config.theme").colors
+            local usage = require("config.agent_usage")
+
+            local function esc(text)
+              return (text:gsub("%%", "%%%%"))
+            end
+
+            local function fmt_tokens(n)
+              if n >= 1000000 then
+                return string.format("%.1fM", n / 1000000)
+              elseif n >= 1000 then
+                return string.format("%.1fK", n / 1000)
+              end
+              return tostring(n)
+            end
+
+            local total = usage.total()
+            if total.tokens == 0 then
+              return {}
+            end
+
+            local text = "  " .. fmt_tokens(total.tokens) .. " tok"
+            if total.cost then
+              text = text .. string.format(" · %s$%.2f", total.is_estimate and "~" or "", total.cost)
+            end
+
+            return { { text = esc(text .. "  "), fg = colors.brown } }
+          end,
           right = function()
             local colors = require("config.theme").colors
             local git = require("config.git")
@@ -121,6 +153,9 @@ return {
     },
     config = function(_, opts)
       require("config.sysmonitor").start(3000)
+      -- 15s, no 2-3s como sysmonitor: cada tick lee JSONL/sqlite de disco
+      -- (5 herramientas), no vale la pena hacerlo tan seguido.
+      require("config.agent_usage").start(15000)
       require("bufferline").setup(opts)
 
       local timer = vim.uv.new_timer()

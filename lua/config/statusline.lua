@@ -7,6 +7,7 @@ local M = {}
 
 local git = require("config.git")
 local agents_status = require("config.agents_status")
+local copilot_status = require("config.copilot_status")
 git.start_watch()
 
 -- Agentes de IA corriendo (lua/plugins/ai_cli.lua): ●N visibles, ○N
@@ -24,6 +25,24 @@ local function agents()
     table.insert(parts, string.format("○%d", hidden))
   end
   return string.format("%%#StatuslineAgents#%s%%#StatusLine#", table.concat(parts, " "))
+end
+
+-- Estado de GitHub Copilot (lua/plugins/copilot.lua, vía
+-- config/copilot_status.lua): ● listo, ◐ pensando, ✕ warning/error, ○
+-- apagado/sin arrancar todavía.
+local function copilot()
+  local status = copilot_status.status
+  local icon, hl
+  if status == "InProgress" then
+    icon, hl = "◐ Copilot", "StatuslineCopilotBusy"
+  elseif status == "Warning" then
+    icon, hl = "✕ Copilot", "StatuslineCopilotWarn"
+  elseif status == "Normal" then
+    icon, hl = "● Copilot", "StatuslineCopilotOk"
+  else
+    icon, hl = "○ Copilot", "StatuslineCopilotOff"
+  end
+  return string.format("%%#%s#%s%%#StatusLine#", hl, icon)
 end
 
 local function git_branch()
@@ -80,6 +99,7 @@ function M.render()
   local left = table.concat({
     git_branch(),
     agents(),
+    copilot(),
     diagnostics(),
     "  " .. filename(),
   }, "  ")
@@ -104,6 +124,10 @@ local function set_highlights()
   vim.api.nvim_set_hl(0, "StatuslineWarn", { fg = colors.warn, bold = true })
   vim.api.nvim_set_hl(0, "StatuslinePos", { fg = colors.fg })
   vim.api.nvim_set_hl(0, "StatuslineDim", { fg = colors.green_dim })
+  vim.api.nvim_set_hl(0, "StatuslineCopilotOk", { fg = colors.green })
+  vim.api.nvim_set_hl(0, "StatuslineCopilotBusy", { fg = colors.tan })
+  vim.api.nvim_set_hl(0, "StatuslineCopilotWarn", { fg = colors.error, bold = true })
+  vim.api.nvim_set_hl(0, "StatuslineCopilotOff", { fg = colors.green_dim })
 end
 
 function M.setup()
