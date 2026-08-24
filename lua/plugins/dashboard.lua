@@ -22,6 +22,7 @@ return {
           { icon = " ", key = "f", desc = "Buscar archivos", action = ":Telescope find_files" },
           { icon = " ", key = "g", desc = "Buscar texto (live grep)", action = ":Telescope live_grep" },
           { icon = " ", key = "r", desc = "Archivos recientes", action = ":Telescope oldfiles" },
+          { icon = " ", key = "p", desc = "Carpetas recientes (Open Recent)", action = ":Projects" },
           { icon = " ", key = "e", desc = "Explorador de archivos", action = ":NvimTreeFocus" },
           { icon = " ", key = "s", desc = "Restaurar sesión (carpeta actual)", action = function() require("persistence").load() end },
           { icon = " ", key = "n", desc = "Nuevo archivo", action = ":ene | startinsert" },

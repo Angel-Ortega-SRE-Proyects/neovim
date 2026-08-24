@@ -2,7 +2,7 @@ local opt = vim.opt
 
 -- UI
 opt.number = true
-opt.relativenumber = true
+opt.relativenumber = false -- fija (1,2,3...), no salta al moverte
 opt.cursorline = true
 opt.signcolumn = "yes"
 opt.termguicolors = true

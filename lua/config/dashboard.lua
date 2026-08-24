@@ -14,6 +14,7 @@ local GROUPS = {
       { "<leader>fb", "Listar buffers abiertos" },
       { "<leader>fh", "Buscar en la ayuda (:help)" },
       { "<leader>fo", "Archivos recientes" },
+      { "<leader>fp  /  :Projects", "Carpetas recientes (Open Recent estilo VSCode)" },
     },
   },
   {

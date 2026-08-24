@@ -90,21 +90,29 @@ return {
             local git = require("config.git")
             local sysmonitor = require("config.sysmonitor")
 
+            -- bufferline mide cada texto con nvim_eval_statusline, que lo
+            -- trata como una EXPRESIÓN de statusline: un "%" suelto ahí
+            -- (ej. el "12%" de CPU) no es texto literal, arranca un ítem
+            -- -- hay que escaparlo como "%%" para que se muestre tal cual.
+            local function esc(text)
+              return (text:gsub("%%", "%%%%"))
+            end
+
             local segs = {}
 
             local branch = git.branch()
             if branch ~= "" then
-              table.insert(segs, { text = "  " .. branch .. " ", fg = colors.brown })
+              table.insert(segs, { text = esc("  " .. branch .. " "), fg = colors.brown })
               local stat = git.diff_stat()
               if stat then
                 table.insert(segs, {
-                  text = string.format("⇕ %d archivo%s +%d -%d  ", stat.files, stat.files == 1 and "" or "s", stat.add, stat.del),
+                  text = esc(string.format("⇕ %d archivo%s +%d -%d  ", stat.files, stat.files == 1 and "" or "s", stat.add, stat.del)),
                   fg = colors.warn,
                 })
               end
             end
 
-            table.insert(segs, { text = sysmonitor.status() .. " ", fg = colors.green_dim })
+            table.insert(segs, { text = esc(sysmonitor.status() .. " "), fg = colors.green_dim })
 
             return segs
           end,
