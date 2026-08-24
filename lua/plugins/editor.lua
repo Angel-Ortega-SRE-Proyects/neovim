@@ -78,7 +78,51 @@ return {
             separator = true,
           },
         },
+        -- Barra de "arriba": rama + cambios sin commitear de la rama actual
+        -- + recursos del sistema (CPU/MEM/DISK/NET, antes en la barra de
+        -- abajo -- ver lua/config/statusline.lua). Bufferline no repinta
+        -- esto solo, así que hay un timer más abajo que fuerza
+        -- :redrawtabline cada 2s (mismo patrón que el redrawstatus de
+        -- statusline.lua para el indicador de agentes).
+        custom_areas = {
+          right = function()
+            local colors = require("config.theme").colors
+            local git = require("config.git")
+            local sysmonitor = require("config.sysmonitor")
+
+            local segs = {}
+
+            local branch = git.branch()
+            if branch ~= "" then
+              table.insert(segs, { text = "  " .. branch .. " ", fg = colors.brown })
+              local stat = git.diff_stat()
+              if stat then
+                table.insert(segs, {
+                  text = string.format("⇕ %d archivo%s +%d -%d  ", stat.files, stat.files == 1 and "" or "s", stat.add, stat.del),
+                  fg = colors.warn,
+                })
+              end
+            end
+
+            table.insert(segs, { text = sysmonitor.status() .. " ", fg = colors.green_dim })
+
+            return segs
+          end,
+        },
       },
     },
+    config = function(_, opts)
+      require("config.sysmonitor").start(3000)
+      require("bufferline").setup(opts)
+
+      local timer = vim.uv.new_timer()
+      timer:start(
+        2000,
+        2000,
+        vim.schedule_wrap(function()
+          pcall(vim.cmd.redrawtabline)
+        end)
+      )
+    end,
   },
 }

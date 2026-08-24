@@ -34,6 +34,39 @@ function M.branch()
   return branch
 end
 
+-- Cambios SIN commitear en la rama actual (staged + sin stage, contra
+-- HEAD) -- { files, add, del } o nil si está todo limpio / no hay HEAD
+-- todavía (repo sin commits). --numstat en vez de --shortstat: el texto de
+-- --shortstat viene en el idioma de git (locale), --numstat es siempre
+-- números en columnas fijas, no depende de eso. La usa lua/plugins/editor.lua
+-- (bufferline) para la barra de arriba.
+local diff_stat = nil
+
+local function refresh_diff_stat()
+  local cwd = vim.fn.getcwd()
+  vim.system({ "git", "diff", "--numstat", "HEAD" }, { text = true, cwd = cwd }, function(res)
+    if res.code ~= 0 or not res.stdout or vim.trim(res.stdout) == "" then
+      diff_stat = nil
+      return
+    end
+    local files, add, del = 0, 0, 0
+    for line in res.stdout:gmatch("[^\n]+") do
+      files = files + 1
+      local a, d = line:match("^(%d+)%s+(%d+)%s+")
+      if a then
+        add = add + tonumber(a)
+        del = del + tonumber(d)
+      end
+      -- binarios: "-\t-\tpath" -- ya se contó el archivo, no suman líneas
+    end
+    diff_stat = { files = files, add = add, del = del }
+  end)
+end
+
+function M.diff_stat()
+  return diff_stat
+end
+
 --- Picker de commits donde <CR> abre el diff de ese commit en Diffview
 --- (en vez del `checkout` que Telescope hace por defecto, que muta el
 --- working tree sin avisar). <C-o> conserva el checkout por si hace falta.
@@ -86,17 +119,28 @@ function M.open_status()
   })
 end
 
-function M.start_watch()
+local function refresh_all()
   refresh_branch()
+  refresh_diff_stat()
+end
+
+function M.start_watch()
+  refresh_all()
   local timer = vim.uv.new_timer()
   timer:start(
     1000,
     5000,
-    vim.schedule_wrap(refresh_branch)
+    vim.schedule_wrap(refresh_all)
   )
   vim.api.nvim_create_autocmd("DirChanged", {
     group = vim.api.nvim_create_augroup("GitBranchWatch", { clear = true }),
-    callback = refresh_branch,
+    callback = refresh_all,
+  })
+  -- Guardar un archivo es el momento más común en que cambia el diff --
+  -- no hace falta esperar hasta el próximo tick del timer (hasta 5s).
+  vim.api.nvim_create_autocmd("BufWritePost", {
+    group = vim.api.nvim_create_augroup("GitDiffStatWatch", { clear = true }),
+    callback = refresh_diff_stat,
   })
 end
 

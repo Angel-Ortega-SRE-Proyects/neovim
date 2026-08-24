@@ -82,6 +82,23 @@ function M.apply_base_highlights()
   vim.api.nvim_set_hl(0, "PmenuSel", { bg = c.green_shade, fg = c.green_bright })
   vim.api.nvim_set_hl(0, "NonText", { fg = c.green_shade })
   vim.api.nvim_set_hl(0, "EndOfBuffer", { fg = c.green_shade })
+
+  -- telescope.nvim: bordes/títulos venían en azul de tokyonight por
+  -- defecto (ningún archivo los pisaba todavía) -- se ve en cualquier
+  -- picker, incluido el de lua/plugins/ai_cli.lua (<leader>aa).
+  vim.api.nvim_set_hl(0, "TelescopeNormal", { bg = c.bg_alt, fg = c.fg })
+  vim.api.nvim_set_hl(0, "TelescopeBorder", { bg = c.bg_alt, fg = c.green_dim })
+  vim.api.nvim_set_hl(0, "TelescopePromptNormal", { bg = c.bg_alt, fg = c.fg })
+  vim.api.nvim_set_hl(0, "TelescopePromptBorder", { bg = c.bg_alt, fg = c.green_dim })
+  vim.api.nvim_set_hl(0, "TelescopeResultsBorder", { bg = c.bg_alt, fg = c.green_dim })
+  vim.api.nvim_set_hl(0, "TelescopePreviewBorder", { bg = c.bg_alt, fg = c.green_dim })
+  vim.api.nvim_set_hl(0, "TelescopePromptTitle", { bg = c.green_shade, fg = c.green, bold = true })
+  vim.api.nvim_set_hl(0, "TelescopeResultsTitle", { bg = c.green_shade, fg = c.green, bold = true })
+  vim.api.nvim_set_hl(0, "TelescopePreviewTitle", { bg = c.green_shade, fg = c.green, bold = true })
+  vim.api.nvim_set_hl(0, "TelescopeSelection", { bg = c.green_shade, fg = c.green_bright })
+  vim.api.nvim_set_hl(0, "TelescopeSelectionCaret", { bg = c.green_shade, fg = c.green })
+  vim.api.nvim_set_hl(0, "TelescopeMatching", { fg = c.brown, bold = true })
+  vim.api.nvim_set_hl(0, "TelescopePromptPrefix", { fg = c.green })
 end
 
 return M

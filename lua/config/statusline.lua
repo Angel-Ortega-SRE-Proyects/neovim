@@ -1,12 +1,30 @@
 -- Barra de estado hecha a mano (sin plugin), una sola franja global abajo,
--- estilo VSCode: rama de git, diagnósticos, archivo, CPU/MEM/DISK, posición,
--- encoding. Se actualiza en tiempo real. Edita M.render() a tu gusto.
+-- estilo VSCode: rama de git, diagnósticos, agentes de IA, archivo,
+-- posición, encoding. CPU/MEM/DISK/NET y el resumen de cambios de la rama
+-- viven en la barra de ARRIBA (lua/plugins/editor.lua, custom_areas de
+-- bufferline). Se actualiza en tiempo real. Edita M.render() a tu gusto.
 local M = {}
 
-local sysmonitor = require("config.sysmonitor")
 local git = require("config.git")
-sysmonitor.start(3000)
+local agents_status = require("config.agents_status")
 git.start_watch()
+
+-- Agentes de IA corriendo (lua/plugins/ai_cli.lua): ●N visibles, ○N
+-- ocultos en segundo plano. Vacío si no hay ninguno.
+local function agents()
+  local visible, hidden = agents_status.visible, agents_status.hidden
+  if visible == 0 and hidden == 0 then
+    return ""
+  end
+  local parts = {}
+  if visible > 0 then
+    table.insert(parts, string.format("●%d", visible))
+  end
+  if hidden > 0 then
+    table.insert(parts, string.format("○%d", hidden))
+  end
+  return string.format("%%#StatuslineAgents#%s%%#StatusLine#", table.concat(parts, " "))
+end
 
 local function git_branch()
   local head = git.branch()
@@ -58,29 +76,15 @@ local function fileinfo()
   return string.format("%%#StatuslineDim#%s  %s  %s%%#StatusLine#", enc:upper(), fmt, ft)
 end
 
-local function sys_status()
-  local v = sysmonitor.values()
-  return table.concat({
-    string.format("%%#StatuslineCpu# %d%%%%%%#StatusLine#", v.cpu),
-    string.format("%%#StatuslineMem#󰍛 %.1f/%.1fGB%%#StatusLine#", v.mem_used_gb, v.mem_total_gb),
-    string.format("%%#StatuslineDisk#󰋊 %.0f/%.0fGB%%#StatusLine#", v.disk_used_gb, v.disk_total_gb),
-    string.format(
-      "%%#StatuslineNet#󰛳 ↓%s ↑%s%%#StatusLine#",
-      sysmonitor.fmt_rate(v.net_rx_bytes_per_sec),
-      sysmonitor.fmt_rate(v.net_tx_bytes_per_sec)
-    ),
-  }, "  ")
-end
-
 function M.render()
   local left = table.concat({
     git_branch(),
+    agents(),
     diagnostics(),
     "  " .. filename(),
   }, "  ")
 
   local right = table.concat({
-    sys_status(),
     position(),
     fileinfo(),
   }, "   ")
@@ -95,12 +99,9 @@ end
 local colors = require("config.theme").colors
 local function set_highlights()
   vim.api.nvim_set_hl(0, "StatuslineGitBranch", { fg = colors.brown, bold = true })
+  vim.api.nvim_set_hl(0, "StatuslineAgents", { fg = colors.green, bold = true })
   vim.api.nvim_set_hl(0, "StatuslineError", { fg = colors.error, bold = true })
   vim.api.nvim_set_hl(0, "StatuslineWarn", { fg = colors.warn, bold = true })
-  vim.api.nvim_set_hl(0, "StatuslineCpu", { fg = colors.green })
-  vim.api.nvim_set_hl(0, "StatuslineMem", { fg = colors.tan })
-  vim.api.nvim_set_hl(0, "StatuslineDisk", { fg = colors.green })
-  vim.api.nvim_set_hl(0, "StatuslineNet", { fg = colors.green_dim })
   vim.api.nvim_set_hl(0, "StatuslinePos", { fg = colors.fg })
   vim.api.nvim_set_hl(0, "StatuslineDim", { fg = colors.green_dim })
 end
@@ -115,8 +116,9 @@ function M.setup()
     callback = set_highlights,
   })
 
-  -- CPU/MEM/DISK cambian solos (no por moverte); fuerza redibujar la barra
-  -- cada pocos segundos para que se vea "en tiempo real".
+  -- Los agentes de IA (lua/plugins/ai_cli.lua) cambian de estado solos, no
+  -- por moverte en el buffer; fuerza redibujar la barra cada pocos segundos
+  -- para que el indicador ●/○ se vea "en tiempo real".
   local timer = vim.uv.new_timer()
   timer:start(
     2000,
