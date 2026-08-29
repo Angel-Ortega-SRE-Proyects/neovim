@@ -209,10 +209,19 @@ local function tick()
   read_net()
 end
 
+local started_timer = nil
+
+-- Idempotente: si el spec de bufferline se re-configura (:Lazy reload, hot
+-- reload al editar plugins/editor.lua) sin esta guarda quedaba un timer
+-- viejo corriendo por cada llamada, acumulando spawns de df/top/netstat.
 function M.start(interval_ms)
+  if started_timer then
+    return started_timer
+  end
   tick()
   local timer = vim.uv.new_timer()
   timer:start(1000, interval_ms or 3000, vim.schedule_wrap(tick))
+  started_timer = timer
   return timer
 end
 

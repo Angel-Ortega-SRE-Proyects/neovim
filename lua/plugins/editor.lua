@@ -49,11 +49,6 @@ return {
     opts = {},
   },
   {
-    "folke/which-key.nvim",
-    event = "VeryLazy",
-    opts = {},
-  },
-  {
     "lukas-reineke/indent-blankline.nvim",
     main = "ibl",
     event = { "BufReadPost", "BufNewFile" },
@@ -96,30 +91,16 @@ return {
               return (text:gsub("%%", "%%%%"))
             end
 
-            local function fmt_tokens(n)
-              if n >= 1000000 then
-                return string.format("%.1fM", n / 1000000)
-              elseif n >= 1000 then
-                return string.format("%.1fK", n / 1000)
-              end
-              return tostring(n)
-            end
-
-            local total = usage.total()
             local quotas = usage.quota_summary()
-            if total.tokens == 0 and not quotas then
+            local sessions = usage.session_summary()
+            if not quotas and not sessions then
               return {}
             end
 
-            local text = quotas and ("  " .. quotas) or ""
-            if total.tokens > 0 then
-              text = text .. (quotas and "  ·  " or "  ") .. fmt_tokens(total.tokens) .. " tok"
-            end
-            if total.cost and total.tokens > 0 then
-              text = text .. string.format(" · %s$%.2f", total.is_estimate and "~" or "", total.cost)
-            end
-
-            return { { text = esc(text .. "  "), fg = colors.brown } }
+            local parts = {}
+            if quotas then table.insert(parts, quotas) end
+            if sessions then table.insert(parts, sessions) end
+            return { { text = esc("  " .. table.concat(parts, "  ·  ") .. "  "), fg = colors.brown } }
           end,
           right = function()
             local colors = require("config.theme").colors

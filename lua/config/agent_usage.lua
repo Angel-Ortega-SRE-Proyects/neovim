@@ -12,6 +12,7 @@
 local M = {
   data = {}, -- name -> { tokens = N, cost = N|nil, exact_cost = bool }
   quotas = {}, -- name -> { session_remaining, session_reset, weekly_remaining, weekly_reset }
+  quota_alerts = {},
 }
 
 -- USD por millón de tokens, tarifa única (no por input/output separado)
@@ -289,6 +290,13 @@ function M.refresh()
   refresh_gemini(cwd)
   refresh_copilot_cli(cwd)
   M.refresh_quotas()
+  if M.active_quota_agent == "Codex" then M.refresh_codex_quota() end
+end
+
+function M.activate_quota_monitor(name)
+  M.active_quota_agent = name
+  if name == "Codex" then M.refresh_codex_quota() end
+  M.refresh_quotas()
 end
 
 -- Codex y Claude muestran la cuota de suscripción en sus propias terminales,
@@ -319,28 +327,126 @@ function M.refresh_quotas()
       end
     end
   end
-  M.quotas = {}
+  local snapshot = vim.fn.getcwd() .. "/.claude/usage_limits.json"
+  local stream = io.open(snapshot, "r")
+  if stream then
+    local ok, limits = pcall(vim.json.decode, stream:read("*a"))
+    stream:close()
+    if ok and limits then
+      local five_hour, seven_day = limits.five_hour or {}, limits.seven_day or {}
+      claude = {
+        session_remaining = five_hour.used_percentage and 100 - five_hour.used_percentage or nil,
+        session_reset = five_hour.resets_at and os.date("%H:%M", five_hour.resets_at) or nil,
+        weekly_remaining = seven_day.used_percentage and 100 - seven_day.used_percentage or nil,
+        weekly_reset = seven_day.resets_at and os.date("%d %b %H:%M", seven_day.resets_at) or nil,
+      }
+    end
+  end
   if codex then M.quotas.Codex = codex end
-  if claude then M.quotas["Claude Code"] = claude end
+  if claude then
+    M.quotas["Claude Code"] = claude
+    if M.active_quota_agent == "Claude Code" then M.notify_quota("Claude Code", claude) end
+  end
+end
+
+function M.notify_quota(name, quota)
+  local used = 100 - (quota.session_remaining or 100)
+  local level = used >= 95 and "critical" or used >= 80 and "warning" or nil
+  if not level then
+    M.quota_alerts[name] = nil
+    return
+  end
+  if M.quota_alerts[name] == level then return end
+  M.quota_alerts[name] = level
+  local reset = quota.session_reset and (" · reinicia " .. quota.session_reset) or ""
+  vim.notify(string.format("%s: %d%% de la ventana de 5h usado%s", name, used, reset),
+    level == "critical" and vim.log.levels.ERROR or vim.log.levels.WARN,
+    { title = level == "critical" and "󰅙 Límite casi agotado" or "󰀦 Uso elevado", timeout = 8000 })
+end
+
+function M.refresh_codex_quota()
+  local now = os.time()
+  if M.codex_quota_refreshed_at and now - M.codex_quota_refreshed_at < 300 then return end
+  if M.codex_quota_pending then return end
+  M.codex_quota_pending = true
+  local job
+  local function save_limits(limits)
+    local primary, secondary = limits.primary or {}, limits.secondary or {}
+            M.quotas.Codex = {
+      session_remaining = primary.usedPercent and 100 - primary.usedPercent or nil,
+      session_reset = primary.resetsAt and os.date("%H:%M", primary.resetsAt) or nil,
+      weekly_remaining = secondary.usedPercent and 100 - secondary.usedPercent or nil,
+      weekly_reset = secondary.resetsAt and os.date("%d %b %H:%M", secondary.resetsAt) or nil,
+            }
+            M.notify_quota("Codex", M.quotas.Codex)
+    M.codex_quota_refreshed_at = os.time()
+    M.codex_quota_pending = false
+    pcall(vim.cmd.redrawtabline)
+    if job then vim.fn.jobstop(job) end
+  end
+  job = vim.fn.jobstart({ "codex", "app-server", "--stdio" }, {
+    on_stdout = function(_, data)
+      for _, line in ipairs(data) do
+        local ok, response = pcall(vim.json.decode, line)
+        local limits = ok and response.id == 2 and response.result and response.result.rateLimits
+        if limits then save_limits(limits) end
+      end
+    end,
+    on_exit = function()
+      vim.schedule(function() M.codex_quota_pending = false end)
+    end,
+  })
+  if job <= 0 then
+    M.codex_quota_pending = false
+    return
+  end
+  vim.fn.chansend(job, table.concat({
+    vim.json.encode({ id = 1, method = "initialize", params = { clientInfo = { name = "vim-usage", version = "1.0" } } }),
+    vim.json.encode({ method = "initialized", params = {} }),
+    vim.json.encode({ id = 2, method = "account/rateLimits/read", params = vim.NIL }),
+  }, "\n") .. "\n")
 end
 
 function M.quota_summary()
   local parts = {}
-  local function add(name, quota, weekly_label)
+  local function add(name, quota)
     if not quota then return end
     local text = name
     if quota.session_remaining then
-      text = text .. string.format(" %d%%", quota.session_remaining)
-      if quota.session_reset then text = text .. " · " .. quota.session_reset end
+      text = text .. string.format(" 5h %d%%", 100 - quota.session_remaining)
+      if quota.session_reset then text = text .. " → " .. quota.session_reset end
     end
     if quota.weekly_remaining then
-      text = text .. string.format(" · %s %d%%", weekly_label, quota.weekly_remaining)
-      if quota.weekly_reset then text = text .. " · " .. quota.weekly_reset end
+      text = text .. string.format(" · 7d %d%%", 100 - quota.weekly_remaining)
+      if quota.weekly_reset then text = text .. " → " .. quota.weekly_reset end
+    end
+    local usage_name = name == "Claude" and "Claude Code" or name
+    local tokens = (M.data[usage_name] or {}).tokens or 0
+    if tokens > 0 then
+      local amount = tokens >= 1000000 and string.format("%.1fM", tokens / 1000000)
+        or tokens >= 1000 and string.format("%.1fK", tokens / 1000) or tostring(tokens)
+      text = text .. " · " .. amount .. " tok"
     end
     table.insert(parts, text)
   end
-  add("Codex", M.quotas.Codex, "sem")
-  add("Claude", M.quotas["Claude Code"], "sem")
+  if not M.active_quota_agent or M.active_quota_agent == "Codex" then add("Codex", M.quotas.Codex) end
+  if not M.active_quota_agent or M.active_quota_agent == "Claude Code" then add("Claude", M.quotas["Claude Code"]) end
+  return #parts > 0 and table.concat(parts, "  |  ") or nil
+end
+
+function M.session_summary()
+  local parts = {}
+  local names = { "Claude Code", "Codex", "OpenCode", "Gemini", "Copilot" }
+  local labels = { ["Claude Code"] = "Claude", Codex = "Codex", OpenCode = "OpenCode", Gemini = "Gemini", Copilot = "Copilot" }
+  for _, name in ipairs(names) do
+    local tokens = (M.data[name] or {}).tokens or 0
+    if (not M.active_quota_agent or name == M.active_quota_agent)
+      and tokens > 0 and not ((name == "Codex" and M.quotas.Codex) or (name == "Claude Code" and M.quotas[name])) then
+      local amount = tokens >= 1000000 and string.format("%.1fM", tokens / 1000000)
+        or tokens >= 1000 and string.format("%.1fK", tokens / 1000) or tostring(tokens)
+      table.insert(parts, labels[name] .. " " .. amount .. " tok")
+    end
+  end
   return #parts > 0 and table.concat(parts, "  |  ") or nil
 end
 
@@ -361,7 +467,15 @@ function M.total()
   return { tokens = tokens, cost = any_cost and cost or nil, is_estimate = any_estimate }
 end
 
+local started_timer = nil
+
+-- Idempotente: si el spec de bufferline se re-configura (:Lazy reload, hot
+-- reload al editar plugins/editor.lua) sin esta guarda quedaba un timer
+-- viejo corriendo por cada llamada, acumulando polls de fondo.
 function M.start(interval_ms)
+  if started_timer then
+    return started_timer
+  end
   M.refresh()
   local timer = vim.uv.new_timer()
   timer:start(2000, interval_ms or 15000, vim.schedule_wrap(M.refresh))
@@ -369,6 +483,8 @@ function M.start(interval_ms)
     group = vim.api.nvim_create_augroup("AgentUsageWatch", { clear = true }),
     callback = M.refresh,
   })
+  started_timer = timer
+  return timer
 end
 
 return M

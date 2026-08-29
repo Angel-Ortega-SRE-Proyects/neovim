@@ -1,26 +1,22 @@
 -- Acceso rápido a carpetas, como el "Open Recent" de VSCode: picker de
 -- Telescope con las carpetas que visitaste (se registran solas al cambiar
 -- de cwd, ver lua/config/projects.lua), más una opción para agregar
--- cualquier otra a mano. Al elegir una: cambia el cwd (:cd), lo que ya hace
--- que nvim-tree cambie de raíz solo (sync_root_with_cwd, ver
--- lua/plugins/explorer.lua) y restaura su sesión guardada si existe
--- (persistence.nvim, ver lua/plugins/persistence.lua) -- como VSCode
--- reabriendo el estado de esa carpeta.
+-- cualquier otra a mano. Al elegir una: abre una pestaña propia con cwd
+-- local (:tcd), para que cada proyecto conserve su ruta independiente y
+-- nvim-tree use esa raíz (sync_root_with_cwd, ver lua/plugins/explorer.lua).
 --
 -- Uso:
---   <leader>fp / :Projects   picker de carpetas recientes
+--   <leader>p / <leader>fp / :Projects   picker de carpetas recientes
 --   dentro del picker: Enter = ir, <C-a> = agregar carpeta nueva a mano,
 --   <C-r> = ponerle un nombre propio (ej. "API backend" en vez de la ruta
 --   completa), <C-x> = sacarla de la lista (no borra la carpeta, solo el
 --   recuerdo)
 
-local function goto_project(path)
-  vim.cmd.cd(vim.fn.fnameescape(path))
+local function open_project_tab(path)
+  vim.cmd("tabnew")
+  vim.cmd.tcd(vim.fn.fnameescape(path))
   require("config.projects").record(path)
-  local ok, persistence = pcall(require, "persistence")
-  if ok then
-    persistence.load()
-  end
+  vim.cmd("NvimTreeOpen")
 end
 
 local function add_project_prompt(reopen)
@@ -50,7 +46,7 @@ local function open_projects_picker()
   local cwd = vim.fn.getcwd()
 
   pickers.new({}, {
-    prompt_title = "Carpetas recientes (Enter: ir, <C-a>: agregar, <C-r>: renombrar, <C-x>: quitar)",
+    prompt_title = "Carpetas recientes (Enter: abrir pestaña, <C-a>: agregar, <C-r>: renombrar, <C-x>: quitar)",
     finder = finders.new_table({
       results = projects.list(),
       entry_maker = function(entry)
@@ -74,7 +70,7 @@ local function open_projects_picker()
           return
         end
         actions.close(prompt_bufnr)
-        goto_project(selected.value.path)
+        open_project_tab(selected.value.path)
       end)
       map({ "i", "n" }, "<C-a>", function()
         actions.close(prompt_bufnr)
@@ -121,6 +117,7 @@ require("config.projects").start_watch()
 
 vim.api.nvim_create_user_command("Projects", open_projects_picker, { desc = "Carpetas recientes (como Open Recent de VSCode)" })
 vim.cmd("cnoreabbrev projects Projects")
+vim.keymap.set("n", "<leader>p", open_projects_picker, { desc = "Abrir proyecto en una pestaña nueva" })
 vim.keymap.set("n", "<leader>fp", open_projects_picker, { desc = "Carpetas recientes (como Open Recent de VSCode)" })
 
 return {}

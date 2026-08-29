@@ -73,6 +73,7 @@ local toggle_tool
 local start_new_instance
 local agent_status
 local STATUS_ICON
+local create_agent_hub_welcome
 local agent_hub = {}
 
 local function session_is_visible(session)
@@ -330,9 +331,17 @@ local function create_changes_panel()
   return buf
 end
 
+local function agent_hub_welcome_width()
+  local win = agent_hub.agent_win
+  if win and vim.api.nvim_win_is_valid(win) then
+    return vim.api.nvim_win_get_width(win)
+  end
+  return vim.o.columns
+end
+
 local function hub_welcome_buffer()
   if not (agent_hub.welcome_buf and vim.api.nvim_buf_is_valid(agent_hub.welcome_buf)) then
-    agent_hub.welcome_buf = create_agent_hub_welcome()
+    agent_hub.welcome_buf = create_agent_hub_welcome(agent_hub_welcome_width())
   end
   return agent_hub.welcome_buf
 end
@@ -375,13 +384,14 @@ end
 local agent_hub_namespace = vim.api.nvim_create_namespace("agent-hub")
 
 local function setup_agent_hub_highlights()
-  vim.api.nvim_set_hl(0, "AgentHubTitle", { link = "Title" })
-  vim.api.nvim_set_hl(0, "AgentHubSection", { link = "Special" })
-  vim.api.nvim_set_hl(0, "AgentHubHint", { link = "Comment" })
-  vim.api.nvim_set_hl(0, "AgentHubActive", { link = "Visual" })
-  vim.api.nvim_set_hl(0, "AgentHubRunning", { link = "DiagnosticOk" })
-  vim.api.nvim_set_hl(0, "AgentHubStopped", { link = "Comment" })
-  vim.api.nvim_set_hl(0, "AgentHubAction", { link = "String" })
+  local colors = require("config.theme").colors
+  vim.api.nvim_set_hl(0, "AgentHubTitle", { fg = colors.green, bold = true })
+  vim.api.nvim_set_hl(0, "AgentHubSection", { fg = colors.green_dim, bold = true })
+  vim.api.nvim_set_hl(0, "AgentHubHint", { fg = colors.green_dim, italic = true })
+  vim.api.nvim_set_hl(0, "AgentHubActive", { bg = colors.selection, fg = colors.green_bright })
+  vim.api.nvim_set_hl(0, "AgentHubRunning", { fg = colors.green })
+  vim.api.nvim_set_hl(0, "AgentHubStopped", { fg = colors.green_dim })
+  vim.api.nvim_set_hl(0, "AgentHubAction", { fg = colors.tan })
 end
 
 local function style_agent_hub_window(win, title, is_sidebar)
@@ -519,6 +529,7 @@ local function activate_hub_agent(name, cmd)
   vim.api.nvim_win_set_buf(hub_win, s.buf)
   s.win = hub_win
   agent_hub.active = name
+  require("config.agent_usage").activate_quota_monitor(name)
   if s.cwd then
     agent_hub.git_root = s.cwd
     refresh_changes_panel(agent_hub.changes_buf, s.cwd)
@@ -572,27 +583,52 @@ local function rename_hub_session()
   end)
 end
 
-local function create_agent_hub_welcome()
+local WELCOME_LINES = {
+  "",
+  "█████╗  ██████╗ ███████╗███╗   ██╗████████╗",
+  "██╔══██╗██╔════╝ ██╔════╝████╗  ██║╚══██╔══╝",
+  "███████║██║  ███╗█████╗  ██╔██╗ ██║   ██║   ",
+  "██╔══██║██║   ██║██╔══╝  ██║╚██╗██║   ██║   ",
+  "██║  ██║╚██████╔╝███████╗██║ ╚████║   ██║   ",
+  "╚═╝  ╚═╝ ╚═════╝ ╚══════╝╚═╝  ╚═══╝   ╚═╝   ",
+  "",
+  "██╗  ██╗██╗   ██╗██████╗ ",
+  "██║  ██║██║   ██║██╔══██╗",
+  "███████║██║   ██║██████╔╝",
+  "██╔══██║██║   ██║██╔══██╗",
+  "██║  ██║╚██████╔╝██████╔╝",
+  "╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ",
+  "",
+  "Elige una sesión en el panel izquierdo para comenzar.",
+  "",
+  "⏎  abrir agente                    n  nueva instancia",
+  "",
+  "La terminal no se inicia hasta que tú la selecciones.",
+}
+
+local function render_agent_hub_welcome(buf, width)
+  local lines = vim.tbl_map(function(line)
+    local padding = math.max(0, math.floor((width - vim.fn.strdisplaywidth(line)) / 2))
+    return string.rep(" ", padding) .. line
+  end, WELCOME_LINES)
+  vim.bo[buf].modifiable = true
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+  vim.api.nvim_buf_clear_namespace(buf, agent_hub_namespace, 0, -1)
+  for row = 1, 13 do
+    vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubTitle", row, 0, -1)
+  end
+  vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubHint", 15, 0, -1)
+  vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubAction", 17, 0, -1)
+  vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubHint", 19, 0, -1)
+end
+
+create_agent_hub_welcome = function(width)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].buftype = "nofile"
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].swapfile = false
-  vim.bo[buf].modifiable = true
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
-    "",
-    "                         AGENT HUB",
-    "",
-    "          Elige una sesión en el panel izquierdo para comenzar.",
-    "",
-    "     ⏎  abrir agente      n  nueva instancia",
-    "",
-    "     La terminal no se inicia hasta que tú la selecciones.",
-  })
-  vim.bo[buf].modifiable = false
-  vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubTitle", 1, 0, -1)
-  vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubHint", 3, 0, -1)
-  vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubAction", 5, 0, -1)
-  vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubHint", 7, 0, -1)
+  render_agent_hub_welcome(buf, width)
   return buf
 end
 
@@ -603,7 +639,7 @@ local function create_agent_hub_command_bar()
   vim.bo[buf].swapfile = false
   vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
-    "  [ ↵ Abrir ]  [ n Nueva ]  [ i Renombrar ]  [ ! Detener ]  [ d Diff ]  [ g Carpeta Git ]  [ c Commit ]  [ a Copilot auth ]  [ m Expandir ]",
+    "  [ ↵ Abrir ]  [ n Nueva ]  [ u Cuota ]  [ i Renombrar ]  [ ! Detener ]  [ d Diff ]  [ g Carpeta Git ]  [ c Commit ]  [ a Copilot auth ]  [ m Expandir ]",
   })
   vim.bo[buf].modifiable = false
   vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubAction", 0, 0, -1)
@@ -794,7 +830,7 @@ open_agent_hub = function()
   local command_placeholder = vim.api.nvim_get_current_buf()
 
   setup_agent_hub_highlights()
-  local welcome_buf = create_agent_hub_welcome()
+  local welcome_buf = create_agent_hub_welcome(vim.api.nvim_win_get_width(agent_win))
   local command_buf = create_agent_hub_command_bar()
   vim.api.nvim_win_set_buf(agent_win, welcome_buf)
   vim.api.nvim_win_set_buf(command_win, command_buf)
@@ -826,6 +862,16 @@ open_agent_hub = function()
   vim.api.nvim_win_set_width(sidebar_win, 36)
   vim.api.nvim_win_set_width(changes_win, math.max(32, math.floor(vim.o.columns * 0.25)))
   vim.api.nvim_win_set_height(command_win, 2)
+  render_agent_hub_welcome(welcome_buf, vim.api.nvim_win_get_width(agent_win))
+  vim.api.nvim_create_autocmd("VimResized", {
+    group = vim.api.nvim_create_augroup("AgentHubWelcomeCentering", { clear = true }),
+    callback = function()
+      if agent_hub.welcome_buf and vim.api.nvim_buf_is_valid(agent_hub.welcome_buf)
+          and agent_hub.agent_win and vim.api.nvim_win_is_valid(agent_hub.agent_win) then
+        render_agent_hub_welcome(agent_hub.welcome_buf, vim.api.nvim_win_get_width(agent_hub.agent_win))
+      end
+    end,
+  })
   refresh_hub_changes()
 
   local function open_selected_agent()

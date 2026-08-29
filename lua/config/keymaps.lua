@@ -25,6 +25,14 @@ map("n", "<S-h>", ":bprevious<CR>", { desc = "Prev buffer" })
 map("n", "<S-l>", ":bnext<CR>", { desc = "Next buffer" })
 map("n", "<leader>bd", ":bdelete<CR>", { desc = "Delete buffer" })
 
+-- Tabs
+-- Ir directo al tab N (el número que Vim pinta en la tabline nativa) con
+-- <leader>N. Dígito suelto sin <leader> rompía los conteos nativos de Vim
+-- (3dd, 5j); <leader>N no choca con eso.
+for i = 1, 9 do
+  map("n", "<leader>" .. i, i .. "gt", { desc = "Ir al tab " .. i })
+end
+
 -- Editing
 map("n", "<Esc>", ":nohlsearch<CR>", { desc = "Clear search highlight" })
 map("v", "<", "<gv", { desc = "Indent left" })
