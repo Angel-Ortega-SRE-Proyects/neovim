@@ -37,6 +37,13 @@ fijados en `lazy-lock.json`, garantizando el mismo entorno en cualquier máquina
 - Para actualizar plugins de forma controlada: `:Lazy update` y commitear el nuevo lock file.
 - Formateo de Lua con [stylua](https://github.com/JohnnyMorganz/StyLua) (`.stylua.toml`).
 
+## Espacio de trabajo de agentes
+
+`<leader>aw` (o `:AgentWorkspace [agente]`) muestra un agente a la izquierda
+y el estado de cambios Git a la derecha, en dos columnas que ocupan toda la
+pantalla. El panel derecho se actualiza con `r`; las sesiones siguen vivas al
+volver al modo flotante.
+
 ## Próximos pasos
 
 Este es el punto de partida estándar. Sobre esta base se irán integrando módulos adicionales
