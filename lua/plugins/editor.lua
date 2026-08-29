@@ -106,12 +106,16 @@ return {
             end
 
             local total = usage.total()
-            if total.tokens == 0 then
+            local quotas = usage.quota_summary()
+            if total.tokens == 0 and not quotas then
               return {}
             end
 
-            local text = "  " .. fmt_tokens(total.tokens) .. " tok"
-            if total.cost then
+            local text = quotas and ("  " .. quotas) or ""
+            if total.tokens > 0 then
+              text = text .. (quotas and "  ·  " or "  ") .. fmt_tokens(total.tokens) .. " tok"
+            end
+            if total.cost and total.tokens > 0 then
               text = text .. string.format(" · %s$%.2f", total.is_estimate and "~" or "", total.cost)
             end
 

@@ -11,6 +11,7 @@
 -- única que da el costo real ya calculado por el propio proveedor.
 local M = {
   data = {}, -- name -> { tokens = N, cost = N|nil, exact_cost = bool }
+  quotas = {}, -- name -> { session_remaining, session_reset, weekly_remaining, weekly_reset }
 }
 
 -- USD por millón de tokens, tarifa única (no por input/output separado)
@@ -287,6 +288,60 @@ function M.refresh()
   refresh_opencode(cwd)
   refresh_gemini(cwd)
   refresh_copilot_cli(cwd)
+  M.refresh_quotas()
+end
+
+-- Codex y Claude muestran la cuota de suscripción en sus propias terminales,
+-- no en sus archivos de sesión. Se leen las últimas líneas ya renderizadas:
+-- nunca se consultan credenciales ni se hacen peticiones de red.
+function M.refresh_quotas()
+  local codex, claude
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    if vim.bo[buf].buftype == "terminal" then
+      local line_count = vim.api.nvim_buf_line_count(buf)
+      local lines = vim.api.nvim_buf_get_lines(buf, math.max(0, line_count - 250), -1, false)
+      local text = table.concat(lines, "\n")
+      if text:find("OpenAI Codex", 1, true) then
+        local session_remaining, session_reset = text:match("5h limit:%s*(%d+)%% left%s*%(resets%s*([^%)]+)%)")
+        local weekly_remaining, weekly_reset = text:match("Weekly limit:%s*(%d+)%% left%s*%(resets%s*([^%)]+)%)")
+        if session_remaining or weekly_remaining then
+          codex = { session_remaining = tonumber(session_remaining), session_reset = session_reset,
+            weekly_remaining = tonumber(weekly_remaining), weekly_reset = weekly_reset }
+        end
+      end
+      if text:find("Current week (all models)", 1, true) then
+        local session_used = text:match("Current session.-(%d+)%% used")
+        local weekly_used, weekly_reset = text:match("Current week %(all models%).-(%d+)%% used%s*Resets%s+([^\n]+)")
+        if session_used or weekly_used then
+          claude = { session_remaining = 100 - (tonumber(session_used) or 0),
+            weekly_remaining = 100 - (tonumber(weekly_used) or 0), weekly_reset = weekly_reset }
+        end
+      end
+    end
+  end
+  M.quotas = {}
+  if codex then M.quotas.Codex = codex end
+  if claude then M.quotas["Claude Code"] = claude end
+end
+
+function M.quota_summary()
+  local parts = {}
+  local function add(name, quota, weekly_label)
+    if not quota then return end
+    local text = name
+    if quota.session_remaining then
+      text = text .. string.format(" %d%%", quota.session_remaining)
+      if quota.session_reset then text = text .. " · " .. quota.session_reset end
+    end
+    if quota.weekly_remaining then
+      text = text .. string.format(" · %s %d%%", weekly_label, quota.weekly_remaining)
+      if quota.weekly_reset then text = text .. " · " .. quota.weekly_reset end
+    end
+    table.insert(parts, text)
+  end
+  add("Codex", M.quotas.Codex, "sem")
+  add("Claude", M.quotas["Claude Code"], "sem")
+  return #parts > 0 and table.concat(parts, "  |  ") or nil
 end
 
 --- { tokens, cost, cost_is_estimate } agregado de todos los agentes con
