@@ -95,16 +95,14 @@ autocmd("TermOpen", {
 })
 
 -- Por defecto, <Esc> en modo terminal no hace nada (para no robarle el Esc
--- a programas que corras ahí adentro, como un vim anidado o fzf); hay que
--- usar <C-\><C-n>. Se mapea a <Esc> para salir a modo normal como en
--- cualquier otro buffer, sin tener que hacer `exit`.
--- Nota: si corres algo dentro de la terminal que también use Esc (otro
--- vim, fzf, less...), ese Esc lo va a interceptar esto en vez de llegarle
--- al programa — en ese caso usa <C-\><C-n> para salir.
+-- a programas que corras ahí adentro, como un vim anidado, fzf o un agente
+-- de IA); hay que usar <C-\><C-n>. Se mapea <C-q> a eso para salir a modo
+-- normal sin tener que hacer `exit`, dejando <Esc> libre para el programa
+-- que corra dentro de la terminal.
 autocmd("TermOpen", {
   group = augroup("TermEscToNormal", { clear = true }),
   callback = function(args)
-    vim.keymap.set("t", "<Esc>", [[<C-\><C-n>]], { buffer = args.buf, desc = "Salir a modo normal" })
+    vim.keymap.set("t", "<C-q>", [[<C-\><C-n>]], { buffer = args.buf, desc = "Salir a modo normal" })
   end,
 })
 
@@ -141,8 +139,8 @@ local function poll_terminal_cwd()
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
     if vim.bo[buf].buftype == "terminal" then
       local job = vim.b[buf].terminal_job_id
-      local pid = job and vim.fn.jobpid(job)
-      if pid then
+      local ok, pid = pcall(vim.fn.jobpid, job)
+      if job and ok and pid then
         local dir = vim.uv.fs_readlink("/proc/" .. pid .. "/cwd")
         if dir and dir ~= last_dir[buf] and dir ~= vim.fn.getcwd() then
           last_dir[buf] = dir

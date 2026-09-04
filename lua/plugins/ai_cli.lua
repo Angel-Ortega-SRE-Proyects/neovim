@@ -975,6 +975,7 @@ open_agent_hub = function()
     vim.keymap.set("n", "c", commit_hub_changes, { buffer = buf, desc = "Crear commit Git" })
     vim.keymap.set("n", "m", toggle_hub_maximize, { buffer = buf, desc = "Maximizar/restaurar panel" })
   end
+  vim.keymap.set("n", "t", toggle_hub_bottom_terminal, { buffer = command_buf, desc = "Terminal auxiliar" })
   vim.keymap.set("n", "<C-p>", search_hub_files, { buffer = changes_buf, desc = "Buscar archivos del repositorio Git" })
   vim.keymap.set("n", "<CR>", function()
     if not toggle_changes_folder(changes_buf) and not run_changes_button() and not open_hub_changed_file() then open_selected_agent() end
@@ -1038,9 +1039,9 @@ toggle_tool = function(name, cmd, cwd)
           vim.api.nvim_win_set_buf(agent_hub.agent_win, hub_welcome_buffer())
           agent_hub.active = nil
           style_agent_hub_window(agent_hub.agent_win, "BIENVENIDO", false)
-          render_agent_hub()
         end
         state[name] = nil
+        render_agent_hub()
         publish_status()
       end)
     end,
