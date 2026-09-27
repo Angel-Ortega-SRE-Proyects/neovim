@@ -54,9 +54,9 @@ vuelve a aplicar el tema activo.
 
 En la línea de comandos, escribe por ejemplo `:T` y pulsa `Tab` para abrir
 las sugerencias. Con el menú abierto, `↓` y `↑` cambian el comando mostrado;
-`Ctrl-Y` acepta la opción sin ejecutarla y `Enter` la ejecuta. `Esc` cierra
-el menú; otro `Esc` sale de la línea de comandos. En `:ThemeSelect`, `Esc`
-cancela la elección. El tema activo aparece en la barra inferior.
+`Ctrl-Y` acepta la opción sin ejecutarla y `Enter` la ejecuta. `Esc` cancela
+el comando y cierra el menú en una pulsación. En `:ThemeSelect`, `Esc` cancela
+la elección de inmediato. El tema activo aparece en la barra inferior.
 
 ## Reproducibilidad
 

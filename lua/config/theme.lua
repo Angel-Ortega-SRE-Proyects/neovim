@@ -211,7 +211,12 @@ end
 
 function M.select()
   local names = { "verde", "ambar", "cian", "violeta" }
-  vim.ui.select(names, { prompt = "Seleccionar tema:" }, function(name)
+  vim.ui.select(names, {
+    prompt = "Seleccionar tema:",
+    snacks = {
+      win = { input = { keys = { ["<Esc>"] = { "close", mode = { "n", "i" } } } } },
+    },
+  }, function(name)
     if not name then
       return
     end

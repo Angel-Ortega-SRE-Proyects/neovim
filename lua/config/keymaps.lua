@@ -16,9 +16,7 @@ end, { expr = true, replace_keycodes = true, desc = "Siguiente sugerencia de com
 map("c", "<Up>", function()
   return vim.fn.wildmenumode() == 1 and "<C-p>" or "<Up>"
 end, { expr = true, replace_keycodes = true, desc = "Sugerencia anterior de comando" })
-map("c", "<Esc>", function()
-  return vim.fn.wildmenumode() == 1 and "<C-e>" or "<Esc>"
-end, { expr = true, replace_keycodes = true, desc = "Cerrar sugerencias o salir del comando" })
+map("c", "<Esc>", "<C-c>", { desc = "Cancelar comando y cerrar sugerencias" })
 map("v", "<", "<gv", { desc = "Indent left" })
 map("v", ">", ">gv", { desc = "Indent right" })
 map("v", "J", ":m '>+1<CR>gv=gv", { desc = "Move selection down" })
