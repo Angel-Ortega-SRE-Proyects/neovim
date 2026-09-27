@@ -7,11 +7,16 @@ return {
   lazy = false,
   keys = {
     { "<leader>e", "<cmd>NvimTreeToggle<CR>", desc = "Toggle file explorer" },
-    { "<leader>o", "<cmd>NvimTreeFocus<CR>", desc = "Focus file explorer" },
+    { "<leader>eh", "<cmd>FilesHidden<CR>", desc = "Alternar archivos ocultos" },
   },
   init = function()
+    vim.api.nvim_create_user_command("FilesHidden", function()
+      require("nvim-tree.api").filter.dotfiles.toggle()
+      vim.notify("Filtro de archivos ocultos alternado", vim.log.levels.INFO)
+    end, { desc = "Mostrar u ocultar archivos dotfile en NvimTree" })
+
     -- El explorador arranca CERRADO por defecto (ni con `nvim`, ni con
-    -- `nvim <carpeta>`) — se abre a mano con <leader>e/<leader>o, o desde
+    -- `nvim <carpeta>`) — se abre a mano con <leader>e o :NvimTreeFocus, o desde
     -- el botón "e" del dashboard. Con `nvim <carpeta>` sí cambia el cwd
     -- a esa carpeta, para que quede lista si después abrís el árbol.
     vim.api.nvim_create_autocmd("VimEnter", {
@@ -108,6 +113,9 @@ return {
       update_root = false,
     },
     actions = {
+      -- El portapapeles Wayland no está disponible en esta sesión; usa el
+      -- registro interno de NvimTree para que c/y/gy no generen errores.
+      use_system_clipboard = false,
       open_file = {
         quit_on_open = false,
         resize_window = true,

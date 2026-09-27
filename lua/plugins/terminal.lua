@@ -9,12 +9,11 @@
 --            Neovim (requiere estar dentro de una sesión de tmux). No es
 --            una terminal de Neovim: es un pane hermano, así que sigue
 --            vivo aunque cierres/crashee Neovim, y se navega a él con los
---            mismos <C-hjkl> de smart-splits.nvim (multiplexer_integration
+--            mismos <C-Flechas> de smart-splits.nvim (multiplexer_integration
 --            = "tmux"), no con un atajo aparte.
 --
 -- Uso:
 --   <leader>tt       abrir/enfocar terminal en pestaña
---   <leader>tb       abrir/enfocar el pane de tmux de abajo
 --   :Term ls -la     abre la pestaña y ejecuta ese comando
 --   :Tb ls -la       abre el pane de tmux y ejecuta ese comando
 local term_bufnr = nil
@@ -23,12 +22,15 @@ local function open_tab_terminal(args)
   if term_bufnr and vim.api.nvim_buf_is_valid(term_bufnr) then
     local win = vim.fn.bufwinid(term_bufnr)
     if win == -1 then
+      vim.cmd("tabnew")
       vim.cmd("buffer " .. term_bufnr)
     else
       vim.api.nvim_set_current_win(win)
     end
   else
-    vim.cmd("enew")
+    -- La terminal vive en una pestaña dedicada para no mezclarla con el
+    -- explorador ni con los splits del proyecto activo.
+    vim.cmd("tabnew")
     vim.fn.termopen(vim.o.shell)
     term_bufnr = vim.api.nvim_get_current_buf()
   end
@@ -87,24 +89,37 @@ vim.api.nvim_create_user_command("Tb", function(cmd_opts)
   end
 end, { nargs = "*", desc = "Pane de tmux real abajo (opcional: comando a ejecutar)" })
 
-vim.keymap.set("n", "<leader>tb", "<cmd>Tb<CR>", { desc = "Terminal: pane de tmux (abajo)" })
-
--- :Sys -> monitor de recursos a pantalla completa (top) en ventana flotante.
+-- :Sys -> monitor de recursos en una ventana flotante con la herramienta
+-- disponible de mayor calidad visual y `top` como respaldo.
 vim.api.nvim_create_user_command("Sys", function()
-  local width = math.floor(vim.o.columns * 0.85)
-  local height = math.floor(vim.o.lines * 0.85)
+  local monitor = vim.fn.executable("btop") == 1 and "btop"
+    or vim.fn.executable("htop") == 1 and "htop"
+    or "top -o %CPU"
+  local monitor_name = monitor == "btop" and "btop"
+    or monitor == "htop" and "htop"
+    or "top"
+  local width = math.max(80, math.floor(vim.o.columns * 0.92))
+  local height = math.max(20, math.floor(vim.o.lines * 0.86))
   local buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_open_win(buf, true, {
+  local win = vim.api.nvim_open_win(buf, true, {
     relative = "editor",
     width = width,
     height = height,
     row = math.floor((vim.o.lines - height) / 2),
     col = math.floor((vim.o.columns - width) / 2),
     border = "rounded",
-    title = " Recursos del sistema (q para salir) ",
+    title = " Recursos del sistema · " .. monitor_name .. " · q para salir ",
     title_pos = "center",
+    style = "minimal",
   })
-  vim.fn.termopen("top", {
+  vim.wo[win].number = false
+  vim.wo[win].relativenumber = false
+  vim.wo[win].signcolumn = "no"
+  vim.wo[win].cursorline = false
+  vim.wo[win].winhighlight = "Normal:NormalFloat,NormalNC:NormalFloat,FloatBorder:FloatBorder"
+  vim.bo[buf].bufhidden = "wipe"
+
+  vim.fn.termopen(monitor, {
     on_exit = function()
       if vim.api.nvim_buf_is_valid(buf) then
         vim.api.nvim_buf_delete(buf, { force = true })

@@ -48,7 +48,6 @@ return {
           map("gr", vim.lsp.buf.references, "Goto references")
           map("K", vim.lsp.buf.hover, "Hover")
           map("<leader>rn", vim.lsp.buf.rename, "Rename")
-          map("<leader>ca", vim.lsp.buf.code_action, "Code action")
           map("<leader>d", vim.diagnostic.open_float, "Diagnostic float")
         end,
       })

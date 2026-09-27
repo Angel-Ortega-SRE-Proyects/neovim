@@ -1,10 +1,6 @@
--- La vista docked ("cmdline", pegada a la última fila) rompía la búsqueda
--- por completo: se comprobó en vivo que "/palabra" dejaba de mover el
--- cursor con esa vista. Se usa "cmdline_popup" (la de por defecto), que sí
--- busca bien. El bug del cursor mal ubicado en buffers de terminal que
--- antes se atribuyó a cmdheight=0 en realidad lo resuelve otro fix
--- (desactivar number/signcolumn en TermOpen, ver lua/config/autocmds.lua),
--- así que no hace falta sacrificar la búsqueda por eso.
+-- La línea de comandos vuelve a ser la nativa de Vim. Noice conserva el
+-- menú de sugerencias como una ventana seleccionable, sin convertir ":"
+-- ni "/" en un cuadro flotante centrado.
 return {
   "folke/noice.nvim",
   event = "VeryLazy",
@@ -13,7 +9,7 @@ return {
   },
   opts = {
     cmdline = {
-      view = "cmdline_popup",
+      view = "cmdline",
       format = {
         -- Mismo ícono que usa el panel de terminal (lua/plugins/terminal.lua)
         -- para ":!" (filtro por comando externo), en vez del "$" por defecto.
@@ -27,6 +23,17 @@ return {
     },
     popupmenu = {
       backend = "nui",
+    },
+    views = {
+      popupmenu = {
+        relative = "editor",
+        position = { row = "76%", col = "50%" },
+        size = { width = 80, height = 8 },
+        border = {
+          style = "rounded",
+          padding = { 0, 1 },
+        },
+      },
     },
     presets = {
       bottom_search = false,

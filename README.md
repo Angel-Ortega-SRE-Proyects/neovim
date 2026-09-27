@@ -28,8 +28,35 @@ ln -s "$(pwd)" ~/.config/nvim
 nvim
 ```
 
+## Abrir Neovim a pantalla completa
+
+Desde la raíz del proyecto:
+
+```bash
+./bin/nvim-fullscreen
+```
+
+El lanzador detecta GNOME Terminal, Kitty y Alacritty. Para usarlo desde
+cualquier carpeta, crea un enlace en `~/.local/bin`:
+
+```bash
+ln -s "$(pwd)/bin/nvim-fullscreen" ~/.local/bin/nvim-fullscreen
+```
+
 Al abrir Neovim por primera vez, `lazy.nvim` se clona automáticamente e instala todos los plugins
 fijados en `lazy-lock.json`, garantizando el mismo entorno en cualquier máquina.
+
+## Temas y comandos
+
+Usa `:ThemeSelect` o `<leader>uc` para elegir entre verde, ámbar, cian y
+violeta. La elección se conserva al volver a abrir Neovim. `:ThemeReload`
+vuelve a aplicar el tema activo.
+
+En la línea de comandos, escribe por ejemplo `:T` y pulsa `Tab` para abrir
+las sugerencias. Con el menú abierto, `↓` y `↑` cambian el comando mostrado;
+`Ctrl-Y` acepta la opción sin ejecutarla y `Enter` la ejecuta. `Esc` cierra
+el menú; otro `Esc` sale de la línea de comandos. En `:ThemeSelect`, `Esc`
+cancela la elección. El tema activo aparece en la barra inferior.
 
 ## Reproducibilidad
 

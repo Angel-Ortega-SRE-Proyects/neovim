@@ -5,7 +5,6 @@ return {
   event = "BufReadPre",
   opts = {},
   keys = {
-    { "<leader>Ss", function() require("persistence").load() end, desc = "Restaurar sesión (carpeta actual)" },
     { "<leader>Sl", function() require("persistence").load({ last = true }) end, desc = "Restaurar última sesión" },
     { "<leader>Sd", function() require("persistence").stop() end, desc = "No guardar la sesión actual al salir" },
   },

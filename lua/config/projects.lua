@@ -37,12 +37,26 @@ local function write_all(list)
   f:close()
 end
 
+local function display_name(entry)
+  return entry.name or vim.fn.fnamemodify(entry.path, ":t")
+end
+
+local function tab_title(tabpage, tabnr)
+  local ok_hub, is_hub = pcall(vim.api.nvim_tabpage_get_var, tabpage, "agent_hub")
+  if ok_hub and is_hub then
+    return "Agent Hub"
+  end
+  local ok_name, name = pcall(vim.api.nvim_tabpage_get_var, tabpage, "project_name")
+  if ok_name and name and name ~= "" then
+    return name
+  end
+  return vim.fn.fnamemodify(vim.fn.getcwd(-1, tabnr), ":t")
+end
+
 --- Lista de { path, last } ordenada por más reciente primero.
 function M.list()
   local data = read_all()
-  table.sort(data, function(a, b)
-    return a.last > b.last
-  end)
+  table.sort(data, function(a, b) return (a.last or 0) > (b.last or 0) end)
   return data
 end
 
@@ -67,9 +81,7 @@ function M.record(path)
     table.insert(data, { path = abs, last = os.time() })
   end
 
-  table.sort(data, function(a, b)
-    return a.last > b.last
-  end)
+  table.sort(data, function(a, b) return (a.last or 0) > (b.last or 0) end)
   while #data > MAX_ENTRIES do
     table.remove(data)
   end
@@ -90,6 +102,47 @@ function M.rename(path, name)
     end
   end
   write_all(data)
+  local label = name and name ~= "" and name or vim.fn.fnamemodify(abs, ":t")
+  for _, tabpage in ipairs(vim.api.nvim_list_tabpages()) do
+    local ok, tab_path = pcall(vim.api.nvim_tabpage_get_var, tabpage, "project_path")
+    if ok and tab_path == abs then
+      vim.api.nvim_tabpage_set_var(tabpage, "project_name", label)
+    end
+  end
+  M.refresh_tabs()
+end
+
+function M.mark_current(path)
+  local tabpage = vim.api.nvim_get_current_tabpage()
+  local has_hub, is_hub = pcall(vim.api.nvim_tabpage_get_var, tabpage, "agent_hub")
+  if has_hub and is_hub then
+    return
+  end
+  local abs = normalize(path)
+  local entry
+  for _, candidate in ipairs(M.list()) do
+    if candidate.path == abs then
+      entry = candidate
+      break
+    end
+  end
+  local label = entry and display_name(entry) or vim.fn.fnamemodify(abs, ":t")
+  vim.api.nvim_tabpage_set_var(tabpage, "project_path", abs)
+  vim.api.nvim_tabpage_set_var(tabpage, "project_name", label)
+  M.refresh_tabs()
+end
+
+function M.current_name()
+  local ok, name = pcall(vim.api.nvim_tabpage_get_var, 0, "project_name")
+  return ok and name or nil
+end
+
+function M.refresh_tabs()
+  for tabnr, tabpage in ipairs(vim.api.nvim_list_tabpages()) do
+    local title = tab_title(tabpage, tabnr)
+    vim.api.nvim_tabpage_set_var(tabpage, "name", string.format("%d · %s", tabnr, title))
+  end
+  pcall(vim.cmd.redrawtabline)
 end
 
 function M.remove(path)
@@ -106,16 +159,26 @@ end
 
 function M.start_watch()
   local group = vim.api.nvim_create_augroup("ProjectsRecent", { clear = true })
+  vim.api.nvim_create_autocmd({ "TabNew", "TabEnter", "TabClosed" }, {
+    group = group,
+    callback = function()
+      vim.schedule(M.refresh_tabs)
+    end,
+  })
   vim.api.nvim_create_autocmd("VimEnter", {
     group = group,
     callback = function()
-      M.record(vim.fn.getcwd())
+      local cwd = vim.fn.getcwd()
+      M.record(cwd)
+      M.mark_current(cwd)
     end,
   })
   vim.api.nvim_create_autocmd("DirChanged", {
     group = group,
     callback = function()
-      M.record(vim.fn.getcwd())
+      local cwd = vim.fn.getcwd()
+      M.record(cwd)
+      M.mark_current(cwd)
     end,
   })
 end

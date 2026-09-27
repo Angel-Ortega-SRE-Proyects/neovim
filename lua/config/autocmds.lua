@@ -195,7 +195,7 @@ autocmd("BufReadCmd", {
 -- intercepta directo en la línea de comandos: si escribes ":e" estando en
 -- el explorador, se avisa en vez de ejecutarlo.
 vim.cmd(
-  [[cnoreabbrev <expr> e (&filetype ==# 'NvimTree') ? 'echo "Usa <leader>e/<leader>o para el explorador, no :e"' : 'e']]
+  [[cnoreabbrev <expr> e (&filetype ==# 'NvimTree') ? 'echo "Usa <leader>e o :NvimTreeFocus para el explorador, no :e"' : 'e']]
 )
 
 -- Restore cursor position

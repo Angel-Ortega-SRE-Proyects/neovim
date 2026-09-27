@@ -1,8 +1,5 @@
--- Barra de estado hecha a mano (sin plugin), una sola franja global abajo,
--- estilo VSCode: rama de git, diagnósticos, agentes de IA, archivo,
--- posición, encoding. CPU/MEM/DISK/NET y el resumen de cambios de la rama
--- viven en la barra de ARRIBA (lua/plugins/editor.lua, custom_areas de
--- bufferline). Se actualiza en tiempo real. Edita M.render() a tu gusto.
+-- Barra inferior única: buffers abiertos, proyecto, Git, diagnósticos,
+-- agentes, sistema, archivo activo, posición y encoding.
 local M = {}
 
 local git = require("config.git")
@@ -84,6 +81,43 @@ local function filename()
   return name .. modified
 end
 
+local function buffers()
+  local current = vim.api.nvim_get_current_buf()
+  local items = {}
+  local infos = vim.fn.getbufinfo({ buflisted = 1 })
+  table.sort(infos, function(a, b) return a.bufnr < b.bufnr end)
+  for _, info in ipairs(infos) do
+    local buftype = vim.bo[info.bufnr].buftype
+    local filetype = vim.bo[info.bufnr].filetype
+    if buftype == "" and filetype ~= "NvimTree" then
+      local name = info.name ~= "" and vim.fn.fnamemodify(info.name, ":t") or "[No Name]"
+      if #name > 18 then
+        name = name:sub(1, 17) .. "…"
+      end
+      local marker = info.changed == 1 and " ●" or ""
+      local hl = info.bufnr == current and "StatuslineBufferActive" or "StatuslineBuffer"
+      table.insert(items, string.format("%%#%s# %d:%s%s %%#StatusLine#", hl, info.bufnr, name, marker))
+    end
+  end
+  return table.concat(items)
+end
+
+local function project()
+  local root = vim.g.project_root or vim.fn.getcwd()
+  if not root or root == "" then
+    return ""
+  end
+  local path = vim.fn.fnamemodify(root, ":~")
+  local name = vim.b.project_name or vim.fn.fnamemodify(root, ":t")
+  local basename = vim.fn.fnamemodify(root, ":t")
+  local suffix = name ~= basename and (" · " .. name) or ""
+  local active = vim.fn.expand("%:t")
+  if active ~= "" and active ~= name then
+    suffix = suffix .. " · " .. active
+  end
+  return "%#StatuslineProject# " .. path .. suffix .. " %#StatusLine#"
+end
+
 local function position()
   return string.format("%%#StatuslinePos#Ln %d, Col %d%%#StatusLine#", vim.fn.line("."), vim.fn.col("."))
 end
@@ -95,16 +129,23 @@ local function fileinfo()
   return string.format("%%#StatuslineDim#%s  %s  %s%%#StatusLine#", enc:upper(), fmt, ft)
 end
 
+local function theme_name()
+  local name = require("config.theme").active or "verde"
+  return "%#StatuslineTheme#" .. name .. "%#StatusLine#"
+end
+
 function M.render()
   local left = table.concat({
+    buffers(),
+    project(),
     git_branch(),
     agents(),
     copilot(),
     diagnostics(),
-    "  " .. filename(),
   }, "  ")
 
   local right = table.concat({
+    theme_name(),
     position(),
     fileinfo(),
   }, "   ")
@@ -124,6 +165,10 @@ local function set_highlights()
   vim.api.nvim_set_hl(0, "StatuslineWarn", { fg = colors.warn, bold = true })
   vim.api.nvim_set_hl(0, "StatuslinePos", { fg = colors.fg })
   vim.api.nvim_set_hl(0, "StatuslineDim", { fg = colors.green_dim })
+  vim.api.nvim_set_hl(0, "StatuslineBuffer", { fg = colors.green_dim })
+  vim.api.nvim_set_hl(0, "StatuslineBufferActive", { fg = colors.green_bright, bold = true })
+  vim.api.nvim_set_hl(0, "StatuslineProject", { fg = colors.tan, bold = true })
+  vim.api.nvim_set_hl(0, "StatuslineTheme", { fg = colors.green, bold = true })
   vim.api.nvim_set_hl(0, "StatuslineCopilotOk", { fg = colors.green })
   vim.api.nvim_set_hl(0, "StatuslineCopilotBusy", { fg = colors.tan })
   vim.api.nvim_set_hl(0, "StatuslineCopilotWarn", { fg = colors.error, bold = true })
@@ -132,6 +177,7 @@ end
 
 function M.setup()
   vim.o.laststatus = 3
+  vim.o.showtabline = 0
   vim.o.statusline = "%!v:lua.require('config.statusline').render()"
 
   set_highlights()

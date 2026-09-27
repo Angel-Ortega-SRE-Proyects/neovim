@@ -2,6 +2,27 @@
 
 Guía rápida de comandos para crear y eliminar archivos sin salir de Neovim.
 
+Los archivos ocultos de configuración (`.env`, `.gitignore`, `.config`, etc.)
+se muestran en el explorador. Pulsa `H` dentro de NvimTree o ejecuta
+`:FilesHidden` / `<leader>eh` para alternar dotfiles; `I` alterna archivos
+ignorados por Git. Pulsa `Ctrl-S` o ejecuta `:update` para guardar; en un buffer
+nuevo, `:w` crea el archivo en la ruta indicada.
+
+## Abrir varios archivos y dividir vistas
+
+- `Ctrl-f` o `<leader>ff`: buscar archivos con Telescope.
+- En Telescope, `Ctrl-v` abre la selección en un split vertical.
+- En Telescope, `Ctrl-x` abre la selección en un split horizontal.
+- En Telescope, `Ctrl-t` abre la selección en una pestaña nueva.
+- En Telescope, pulsa `Tab` sobre varias opciones y después `Ctrl-v` o
+  `Ctrl-x` para abrirlas todas divididas.
+- `Enter` abre la opción actual completa en el buffer activo; `q` cierra
+  Telescope sin abrir nada.
+- `:vsplit ruta/archivo`: abrir una ruta en vista vertical.
+- `:split ruta/archivo`: abrir una ruta en vista horizontal.
+- En NvimTree, `v` abre vertical y `s` abre horizontal.
+- `Ctrl+←/↓/↑/→`: cambiar entre las vistas.
+
 ## Crear archivos
 
 ### Comando `:edit` (o `:e`)

@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+project_dir="${PWD}"
+
+if [[ -n "${KITTY_WINDOW_ID:-}" || "${TERM_PROGRAM:-}" == "kitty" || "${TERMINAL_EMULATOR:-}" == "kitty" ]]; then
+    exec kitty --start-as=fullscreen --directory="${project_dir}" nvim "$@"
+fi
+
+if [[ -n "${ALACRITTY_SOCKET:-}" || "${TERM_PROGRAM:-}" == "Alacritty" || "${TERMINAL_EMULATOR:-}" == "alacritty" ]]; then
+    exec alacritty --option window.startup_mode=Fullscreen \
+      --working-directory "${project_dir}" --command nvim "$@"
+fi
+
+if command -v gnome-terminal >/dev/null 2>&1; then
+  exec gnome-terminal --full-screen --working-directory="${project_dir}" \
+    -- nvim "$@"
+fi
+
+printf 'No se encontró un emulador compatible (GNOME Terminal, Kitty o Alacritty).\n' >&2
+exit 1

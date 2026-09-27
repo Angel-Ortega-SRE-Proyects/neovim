@@ -75,6 +75,8 @@ local agent_status
 local STATUS_ICON
 local create_agent_hub_welcome
 local agent_hub = {}
+local layout_agent_hub
+local refresh_hub_changes
 
 local function session_is_visible(session)
   return session
@@ -326,7 +328,11 @@ local function create_changes_panel()
   vim.api.nvim_buf_set_name(buf, "Agent Changes")
   refresh_changes_panel(buf)
   vim.keymap.set("n", "r", function()
-    refresh_changes_panel(buf)
+    if refresh_hub_changes then
+      refresh_hub_changes()
+    else
+      refresh_changes_panel(buf, agent_hub.git_root or vim.fn.getcwd())
+    end
   end, { buffer = buf, desc = "Actualizar cambios Git" })
   return buf
 end
@@ -638,12 +644,50 @@ local function create_agent_hub_command_bar()
   vim.bo[buf].bufhidden = "hide"
   vim.bo[buf].swapfile = false
   vim.bo[buf].modifiable = true
+  local path = vim.fn.fnamemodify(vim.fn.getcwd(), ":~")
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
-    "  [ ↵ Abrir ]  [ n Nueva ]  [ u Cuota ]  [ i Renombrar ]  [ ! Detener ]  [ d Diff ]  [ g Carpeta Git ]  [ c Commit ]  [ a Copilot auth ]  [ m Expandir ]",
+    "  " .. path .. " · Agent Hub",
+    "  [ ↵ Abrir ] [ n Nueva ] [ u Cuota ] [ i Renombrar ] [ ! Detener ] [ d Diff ] [ g Git ] [ c Commit ] [ a Copilot ] [ m Expandir ]",
   })
   vim.bo[buf].modifiable = false
-  vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubAction", 0, 0, -1)
+  vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubTitle", 0, 0, -1)
+  vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubAction", 1, 0, -1)
   return buf
+end
+
+local function resize_hub_window(direction)
+  if direction == "left" then
+    vim.cmd("vertical resize -5")
+  elseif direction == "right" then
+    vim.cmd("vertical resize +5")
+  elseif direction == "up" then
+    vim.cmd("resize -2")
+  elseif direction == "down" then
+    vim.cmd("resize +2")
+  end
+end
+
+local function move_hub_window(direction)
+  local targets = { left = "h", right = "l", up = "k", down = "j" }
+  local target = targets[direction]
+  if target then
+    vim.cmd("wincmd " .. target)
+  end
+end
+
+local function map_hub_navigation(buf)
+  if not (buf and vim.api.nvim_buf_is_valid(buf)) then return end
+  local directions = {
+    ["<C-Left>"] = "left",
+    ["<C-Right>"] = "right",
+    ["<C-Up>"] = "up",
+    ["<C-Down>"] = "down",
+  }
+  for key, direction in pairs(directions) do
+    vim.keymap.set({ "n", "t" }, key, function()
+      move_hub_window(direction)
+    end, { buffer = buf, desc = "Ir al panel " .. direction })
+  end
 end
 
 local function toggle_hub_bottom_terminal()
@@ -671,7 +715,7 @@ local function toggle_hub_bottom_terminal()
   vim.cmd("startinsert")
 end
 
-local function refresh_hub_changes()
+refresh_hub_changes = function()
   refresh_changes_panel(agent_hub.changes_buf, agent_hub.git_root)
   local buf = agent_hub.changes_buf
   if buf and vim.api.nvim_buf_is_valid(buf) then
@@ -773,6 +817,7 @@ local function restore_hub_layout()
   if agent_hub.maximized then
     vim.cmd("wincmd =")
     agent_hub.maximized = false
+    if layout_agent_hub then layout_agent_hub() end
     return true
   end
   return false
@@ -784,6 +829,26 @@ local function toggle_hub_maximize()
     vim.cmd("wincmd _")
     agent_hub.maximized = true
   end
+end
+
+layout_agent_hub = function()
+  if agent_hub.maximized then return end
+  local sidebar = agent_hub.sidebar_win
+  local changes = agent_hub.changes_win
+  local command = agent_hub.command_win
+  if not (sidebar and changes and command) then return end
+  if not (vim.api.nvim_win_is_valid(sidebar)
+      and vim.api.nvim_win_is_valid(changes)
+      and vim.api.nvim_win_is_valid(command)) then
+    return
+  end
+
+  local columns = vim.o.columns
+  local sidebar_width = math.min(36, math.max(28, math.floor(columns * 0.20)))
+  local changes_width = math.min(42, math.max(30, math.floor(columns * 0.24)))
+  pcall(vim.api.nvim_win_set_width, sidebar, sidebar_width)
+  pcall(vim.api.nvim_win_set_width, changes, changes_width)
+  pcall(vim.api.nvim_win_set_height, command, 2)
 end
 
 open_agent_hub = function()
@@ -809,6 +874,10 @@ open_agent_hub = function()
   vim.cmd("tabnew")
   local tabpage = vim.api.nvim_get_current_tabpage()
   vim.api.nvim_tabpage_set_var(tabpage, "agent_hub", true)
+  local projects_ok, projects = pcall(require, "config.projects")
+  if projects_ok then
+    projects.refresh_tabs()
+  end
   local agent_placeholder = vim.api.nvim_get_current_buf()
   local agent_win = vim.api.nvim_get_current_win()
   vim.cmd("rightbelow vsplit")
@@ -859,13 +928,12 @@ open_agent_hub = function()
   style_agent_hub_window(changes_win, "CAMBIOS  ·  Git", false)
   style_agent_hub_window(command_win, "ACCIONES", false)
   style_agent_hub_window(agent_win, "BIENVENIDO", false)
-  vim.api.nvim_win_set_width(sidebar_win, 36)
-  vim.api.nvim_win_set_width(changes_win, math.max(32, math.floor(vim.o.columns * 0.25)))
-  vim.api.nvim_win_set_height(command_win, 2)
+  layout_agent_hub()
   render_agent_hub_welcome(welcome_buf, vim.api.nvim_win_get_width(agent_win))
   vim.api.nvim_create_autocmd("VimResized", {
     group = vim.api.nvim_create_augroup("AgentHubWelcomeCentering", { clear = true }),
     callback = function()
+      layout_agent_hub()
       if agent_hub.welcome_buf and vim.api.nvim_buf_is_valid(agent_hub.welcome_buf)
           and agent_hub.agent_win and vim.api.nvim_win_is_valid(agent_hub.agent_win) then
         render_agent_hub_welcome(agent_hub.welcome_buf, vim.api.nvim_win_get_width(agent_hub.agent_win))
@@ -985,6 +1053,30 @@ open_agent_hub = function()
   end, { buffer = changes_buf, desc = "Pulsar botón de cambios" })
   for _, buf in ipairs({ sidebar_buf, changes_buf, command_buf, welcome_buf }) do
     vim.keymap.set("n", "<Esc>", restore_hub_layout, { buffer = buf, desc = "Restaurar tamaño del Hub" })
+    vim.keymap.set("n", "<C-Left>", function() move_hub_window("left") end,
+      { buffer = buf, desc = "Ir al panel izquierdo" })
+    vim.keymap.set("n", "<C-Right>", function() move_hub_window("right") end,
+      { buffer = buf, desc = "Ir al panel derecho" })
+    vim.keymap.set("n", "<C-Up>", function() move_hub_window("up") end,
+      { buffer = buf, desc = "Ir al panel superior" })
+    vim.keymap.set("n", "<C-Down>", function() move_hub_window("down") end,
+      { buffer = buf, desc = "Ir al panel inferior" })
+    vim.keymap.set("n", "<C-M-Left>", function() resize_hub_window("left") end,
+      { buffer = buf, desc = "Reducir ancho del panel" })
+    vim.keymap.set("n", "<C-A-Left>", function() resize_hub_window("left") end,
+      { buffer = buf, desc = "Reducir ancho del panel" })
+    vim.keymap.set("n", "<C-M-Right>", function() resize_hub_window("right") end,
+      { buffer = buf, desc = "Aumentar ancho del panel" })
+    vim.keymap.set("n", "<C-A-Right>", function() resize_hub_window("right") end,
+      { buffer = buf, desc = "Aumentar ancho del panel" })
+    vim.keymap.set("n", "<C-M-Up>", function() resize_hub_window("up") end,
+      { buffer = buf, desc = "Reducir alto del panel" })
+    vim.keymap.set("n", "<C-A-Up>", function() resize_hub_window("up") end,
+      { buffer = buf, desc = "Reducir alto del panel" })
+    vim.keymap.set("n", "<C-M-Down>", function() resize_hub_window("down") end,
+      { buffer = buf, desc = "Aumentar alto del panel" })
+    vim.keymap.set("n", "<C-A-Down>", function() resize_hub_window("down") end,
+      { buffer = buf, desc = "Aumentar alto del panel" })
   end
 
   render_agent_hub()
@@ -1021,6 +1113,7 @@ toggle_tool = function(name, cmd, cwd)
 
   if s and s.buf and vim.api.nvim_buf_is_valid(s.buf) then
     s.win = vim.api.nvim_open_win(s.buf, true, float_opts(name))
+    map_hub_navigation(s.buf)
     vim.cmd("startinsert")
     publish_status()
     return
@@ -1031,6 +1124,7 @@ toggle_tool = function(name, cmd, cwd)
 
   local buf = vim.api.nvim_create_buf(false, true)
   local win = vim.api.nvim_open_win(buf, true, float_opts(name))
+  map_hub_navigation(buf)
   vim.fn.termopen(cmd, {
     cwd = cwd,
     on_exit = function()
@@ -1143,10 +1237,27 @@ stop_agent = function(name)
   if s.win and vim.api.nvim_win_is_valid(s.win) then
     vim.api.nvim_win_close(s.win, true)
   end
+  local buf = s.buf
+  if buf and vim.api.nvim_buf_is_valid(buf) and #vim.fn.win_findbuf(buf) == 0 then
+    vim.api.nvim_buf_delete(buf, { force = true })
+  end
   close_changes_panel(s)
   state[name] = nil
   publish_status()
 end
+
+vim.api.nvim_create_autocmd("VimLeavePre", {
+  group = vim.api.nvim_create_augroup("AgentHubCleanup", { clear = true }),
+  callback = function()
+    local names = {}
+    for name in pairs(state) do
+      names[#names + 1] = name
+    end
+    for _, name in ipairs(names) do
+      stop_agent(name)
+    end
+  end,
+})
 
 STATUS_ICON = { visible = "●", oculto = "○", detenido = "◌" }
 
@@ -1424,18 +1535,7 @@ vim.api.nvim_create_user_command("AgentsKillAll", function()
   vim.notify(("Matados %d agente(s)"):format(#names), vim.log.levels.INFO)
 end, { desc = "Matar TODOS los agentes de IA corriendo" })
 
-vim.keymap.set("n", "<leader>ac", "<cmd>Claude<CR>", { desc = "Claude Code (toggle)" })
-vim.keymap.set("n", "<leader>ax", "<cmd>Codex<CR>", { desc = "Codex CLI (toggle)" })
-vim.keymap.set("n", "<leader>ao", "<cmd>OpenCode<CR>", { desc = "OpenCode CLI (toggle)" })
-vim.keymap.set("n", "<leader>ag", "<cmd>Gemini<CR>", { desc = "Gemini (toggle)" })
-vim.keymap.set("n", "<leader>aC", "<cmd>CopilotCli<CR>", { desc = "GitHub Copilot CLI (toggle)" })
 vim.keymap.set("n", "<leader>aa", open_agent_hub, { desc = "Hub de agentes" })
-vim.keymap.set("n", "<leader>aw", function()
-  open_agent_workspace_picker("")
-end, { desc = "Agente + cambios Git a pantalla completa" })
-vim.keymap.set("n", "<leader>ad", "<cmd>AgentDiff<CR>", { desc = "Ver diff del agente actual" })
-vim.keymap.set("n", "<leader>ak", "<cmd>AgentKill<CR>", { desc = "Matar el agente actual" })
-vim.keymap.set("n", "<leader>aK", "<cmd>AgentsKillAll<CR>", { desc = "Matar TODOS los agentes" })
 
 -- Vim exige mayúscula inicial en comandos de usuario (:Claude, no :claude);
 -- estas abreviaciones de línea de comandos permiten escribir en minúscula

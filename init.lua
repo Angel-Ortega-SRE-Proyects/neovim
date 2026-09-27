@@ -11,8 +11,11 @@ vim.g.loaded_tarPlugin = 1
 
 require("config.options")
 require("config.keymaps")
-require("config.cheatsheet").setup()
+require("config.project_settings").setup()
+require("config.buffers").setup()
 require("config.autocmds")
+require("config.theme")
 require("config.dashboard").setup()
 require("config.statusline").setup()
+require("config.topline").setup()
 require("config.lazy")

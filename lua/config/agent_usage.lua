@@ -332,8 +332,9 @@ function M.refresh_quotas()
   if stream then
     local ok, limits = pcall(vim.json.decode, stream:read("*a"))
     stream:close()
-    if ok and limits then
-      local five_hour, seven_day = limits.five_hour or {}, limits.seven_day or {}
+    if ok and type(limits) == "table" then
+      local five_hour = type(limits.five_hour) == "table" and limits.five_hour or {}
+      local seven_day = type(limits.seven_day) == "table" and limits.seven_day or {}
       claude = {
         session_remaining = five_hour.used_percentage and 100 - five_hour.used_percentage or nil,
         session_reset = five_hour.resets_at and os.date("%H:%M", five_hour.resets_at) or nil,
@@ -371,7 +372,9 @@ function M.refresh_codex_quota()
   M.codex_quota_pending = true
   local job
   local function save_limits(limits)
-    local primary, secondary = limits.primary or {}, limits.secondary or {}
+    if type(limits) ~= "table" then return end
+    local primary = type(limits.primary) == "table" and limits.primary or {}
+    local secondary = type(limits.secondary) == "table" and limits.secondary or {}
             M.quotas.Codex = {
       session_remaining = primary.usedPercent and 100 - primary.usedPercent or nil,
       session_reset = primary.resetsAt and os.date("%H:%M", primary.resetsAt) or nil,
@@ -388,8 +391,11 @@ function M.refresh_codex_quota()
     on_stdout = function(_, data)
       for _, line in ipairs(data) do
         local ok, response = pcall(vim.json.decode, line)
-        local limits = ok and response.id == 2 and response.result and response.result.rateLimits
-        if limits then save_limits(limits) end
+        local limits = type(response) == "table"
+          and response.id == 2
+          and type(response.result) == "table"
+          and response.result.rateLimits
+        if type(limits) == "table" then save_limits(limits) end
       end
     end,
     on_exit = function()

@@ -6,17 +6,68 @@
 -- nvim-tree use esa raíz (sync_root_with_cwd, ver lua/plugins/explorer.lua).
 --
 -- Uso:
---   <leader>p / <leader>fp / :Projects   picker de carpetas recientes
+--   <leader>p / :Projects   picker de carpetas recientes
+--   <leader>pn / :ProjectNew [ruta]       crear y abrir un proyecto
+--   :ProjectRename [nombre]               nombrar el proyecto actual
 --   dentro del picker: Enter = ir, <C-a> = agregar carpeta nueva a mano,
 --   <C-r> = ponerle un nombre propio (ej. "API backend" en vez de la ruta
 --   completa), <C-x> = sacarla de la lista (no borra la carpeta, solo el
 --   recuerdo)
 
+local projects = require("config.projects")
+
 local function open_project_tab(path)
+  local abs = vim.fn.fnamemodify(path, ":p"):gsub("/$", "")
+  for _, tabpage in ipairs(vim.api.nvim_list_tabpages()) do
+    local ok, tab_path = pcall(vim.api.nvim_tabpage_get_var, tabpage, "project_path")
+    if ok and tab_path == abs then
+      vim.api.nvim_set_current_tabpage(tabpage)
+      return
+    end
+  end
+
   vim.cmd("tabnew")
-  vim.cmd.tcd(vim.fn.fnameescape(path))
-  require("config.projects").record(path)
+  vim.cmd.tcd(vim.fn.fnameescape(abs))
+  projects.record(abs)
+  projects.mark_current(abs)
   vim.cmd("NvimTreeOpen")
+end
+
+local function valid_project_path(path)
+  if vim.fn.isdirectory(path) == 1 then
+    return true
+  end
+  vim.notify("No es una carpeta: " .. path, vim.log.levels.WARN)
+  return false
+end
+
+local function finish_new_project(path, name)
+  if not valid_project_path(path) then
+    return
+  end
+  local abs = vim.fn.fnamemodify(path, ":p"):gsub("/$", "")
+  projects.record(abs)
+  projects.rename(abs, vim.trim(name or ""))
+  open_project_tab(abs)
+end
+
+local function prompt_new_project(path)
+  local function prompt_name(selected_path)
+    vim.ui.input({ prompt = "Nombre del proyecto (vacío = nombre de carpeta): " }, function(name)
+      if name ~= nil then
+        finish_new_project(selected_path, name)
+      end
+    end)
+  end
+  if path and path ~= "" then
+    prompt_name(path)
+    return
+  end
+  vim.ui.input({ prompt = "Carpeta del proyecto: ", completion = "dir", default = vim.fn.getcwd() .. "/" }, function(input)
+    if input and input ~= "" then
+      prompt_name(input)
+    end
+  end)
 end
 
 local function add_project_prompt(reopen)
@@ -24,11 +75,10 @@ local function add_project_prompt(reopen)
     if not input or input == "" then
       return
     end
-    if vim.fn.isdirectory(input) ~= 1 then
-      vim.notify("No es una carpeta: " .. input, vim.log.levels.WARN)
+    if not valid_project_path(input) then
       return
     end
-    require("config.projects").record(input)
+    projects.record(input)
     if reopen then
       reopen()
     end
@@ -41,12 +91,10 @@ local function open_projects_picker()
   local conf = require("telescope.config").values
   local actions = require("telescope.actions")
   local action_state = require("telescope.actions.state")
-  local projects = require("config.projects")
-
   local cwd = vim.fn.getcwd()
 
   pickers.new({}, {
-    prompt_title = "Carpetas recientes (Enter: abrir pestaña, <C-a>: agregar, <C-r>: renombrar, <C-x>: quitar)",
+    prompt_title = "Proyectos (Enter: abrir, <C-n>: nuevo, <C-a>: agregar, <C-r>: nombrar, <C-x>: quitar)",
     finder = finders.new_table({
       results = projects.list(),
       entry_maker = function(entry)
@@ -76,6 +124,10 @@ local function open_projects_picker()
         actions.close(prompt_bufnr)
         add_project_prompt(open_projects_picker)
       end)
+      map({ "i", "n" }, "<C-n>", function()
+        actions.close(prompt_bufnr)
+        prompt_new_project()
+      end)
       map({ "i", "n" }, "<C-r>", function()
         local selected = action_state.get_selected_entry()
         if not selected then
@@ -90,7 +142,7 @@ local function open_projects_picker()
           if input == nil then
             return
           end
-          projects.rename(entry.path, input)
+          projects.rename(entry.path, vim.trim(input))
           open_projects_picker()
         end)
       end)
@@ -115,9 +167,26 @@ end
 -- gracias al loader de lazy.nvim aunque este archivo no lo declare.
 require("config.projects").start_watch()
 
-vim.api.nvim_create_user_command("Projects", open_projects_picker, { desc = "Carpetas recientes (como Open Recent de VSCode)" })
+vim.api.nvim_create_user_command("Projects", open_projects_picker, { desc = "Elegir proyecto guardado" })
+vim.api.nvim_create_user_command("Project", open_projects_picker, { desc = "Elegir proyecto guardado" })
+vim.api.nvim_create_user_command("ProjectNew", function(opts)
+  prompt_new_project(opts.args)
+end, { nargs = "?", complete = "dir", desc = "Crear y abrir proyecto en pestaña propia" })
+vim.api.nvim_create_user_command("ProjectRename", function(opts)
+  local path = vim.fn.getcwd()
+  projects.record(path)
+  local function rename(name)
+    if name ~= nil then
+      projects.rename(path, vim.trim(name))
+    end
+  end
+  if opts.args ~= "" then
+    rename(opts.args)
+  else
+    vim.ui.input({ prompt = "Nombre del proyecto (vacío = nombre de carpeta): ", default = projects.current_name() or "" }, rename)
+  end
+end, { nargs = "*", desc = "Asignar un nombre al proyecto actual" })
 vim.cmd("cnoreabbrev projects Projects")
 vim.keymap.set("n", "<leader>p", open_projects_picker, { desc = "Abrir proyecto en una pestaña nueva" })
-vim.keymap.set("n", "<leader>fp", open_projects_picker, { desc = "Carpetas recientes (como Open Recent de VSCode)" })
-
+vim.keymap.set("n", "<leader>pn", prompt_new_project, { desc = "Crear y abrir proyecto" })
 return {}
