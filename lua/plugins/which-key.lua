@@ -6,8 +6,15 @@
 return {
   "folke/which-key.nvim",
   event = "VeryLazy",
+  keys = {
+    { "<leader>", mode = { "n", "v" } },
+  },
   opts = {
     preset = "modern",
+    delay = 0,
+    triggers = {
+      { "<leader>", mode = { "n", "v" } },
+    },
   },
   config = function(_, opts)
     local wk = require("which-key")
@@ -21,6 +28,9 @@ return {
       { "<leader>l", group = "Diagnósticos/LSP list" },
       { "<leader>S", group = "Sesión (persistence)" },
       { "<leader>m", group = "Markdown" },
+      { "<leader>p", group = "Proyectos" },
+      { "<leader>u", group = "Interfaz" },
+      { "<leader>uc", desc = "Cambiar tema de colores" },
     })
   end,
 }
