@@ -19,3 +19,15 @@ require("config.dashboard").setup()
 require("config.statusline").setup()
 require("config.topline").setup()
 require("config.lazy")
+
+vim.api.nvim_create_user_command("ConfigReload", function()
+  local config_file = vim.fn.stdpath("config") .. "/init.lua"
+  vim.cmd("source " .. vim.fn.fnameescape(config_file))
+  vim.api.nvim_echo({
+    { "Configuración recargada: ", "Normal" },
+    { config_file, "String" },
+  }, false, {})
+end, {
+  desc = "Recargar la configuración de Neovim",
+  force = true,
+})

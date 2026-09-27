@@ -46,6 +46,10 @@ ln -s "$(pwd)/bin/nvim-fullscreen" ~/.local/bin/nvim-fullscreen
 Al abrir Neovim por primera vez, `lazy.nvim` se clona automáticamente e instala todos los plugins
 fijados en `lazy-lock.json`, garantizando el mismo entorno en cualquier máquina.
 
+Con Neovim ya abierto, usa `:ConfigReload`. Al terminar mostrará la ruta de la
+configuración recargada. Para cambios de plugins, reinicia Neovim después de
+recargar.
+
 ## Temas y comandos
 
 Usa `:ThemeSelect` o `<leader>uc` para elegir entre verde, ámbar, cian y
