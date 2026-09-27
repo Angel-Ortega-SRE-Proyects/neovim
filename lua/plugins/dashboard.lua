@@ -31,12 +31,9 @@ return {
     },
   },
   config = function(_, opts)
-    -- Paleta verde/café/negro para el dashboard en vez del azul/violeta de
-    -- tokyonight (Header/Footer heredan de "Title", Icon/Desc de "Special",
-    -- Key de "Number" — todos azulados por defecto). Colores centralizados
-    -- en lua/config/theme.lua — la usan también explorer.lua y
-    -- statusline.lua, así queda un único lugar para tocar. Se reaplica al
-    -- cambiar de colorscheme, igual que el resto del config.
+    -- La paleta activa controla también el dashboard. Así Carbon conserva
+    -- su fondo #1c1c1c y cada preset cambia la interfaz completa sin dejar
+    -- restos del azul/violeta predeterminado de tokyonight.
     local colors = require("config.theme").colors
     local function set_highlights()
       vim.api.nvim_set_hl(0, "SnacksDashboardHeader", { fg = colors.green, bold = true })

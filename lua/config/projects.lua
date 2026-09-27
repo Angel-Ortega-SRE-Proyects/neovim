@@ -41,6 +41,39 @@ local function display_name(entry)
   return entry.name or vim.fn.fnamemodify(entry.path, ":t")
 end
 
+function M.name_for(path)
+  local abs = normalize(path)
+  for _, entry in ipairs(M.list()) do
+    if entry.path == abs then
+      return display_name(entry)
+    end
+  end
+  return vim.fn.fnamemodify(abs, ":t")
+end
+
+function M.open(path)
+  local abs = normalize(path)
+  if vim.fn.isdirectory(abs) ~= 1 then
+    vim.notify("No es una carpeta: " .. abs, vim.log.levels.WARN)
+    return false
+  end
+
+  for _, tabpage in ipairs(vim.api.nvim_list_tabpages()) do
+    local ok, tab_path = pcall(vim.api.nvim_tabpage_get_var, tabpage, "project_path")
+    if ok and tab_path == abs then
+      vim.api.nvim_set_current_tabpage(tabpage)
+      return true
+    end
+  end
+
+  vim.cmd("tabnew")
+  vim.cmd.tcd(vim.fn.fnameescape(abs))
+  M.record(abs)
+  M.mark_current(abs)
+  pcall(vim.cmd, "NvimTreeOpen")
+  return true
+end
+
 local function tab_title(tabpage, tabnr)
   local ok_hub, is_hub = pcall(vim.api.nvim_tabpage_get_var, tabpage, "agent_hub")
   if ok_hub and is_hub then

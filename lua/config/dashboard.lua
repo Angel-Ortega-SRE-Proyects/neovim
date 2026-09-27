@@ -31,11 +31,8 @@ local GROUPS = {
   {
     title = "Git",
     items = {
-      { "<leader>gc  /  :Gc", "Commits — Enter: ver diff del commit, C-o: checkout" },
-      { "<leader>gs  /  :Gs", "Status — Enter: abrir archivo, C-d: ver diff" },
-      { "<leader>gb  /  :Gb", "Listar branches" },
-      { "<leader>gd  /  :DiffviewOpen", "Panel de diffs de lo cambiado" },
-      { "<leader>gh  /  :DiffviewFileHistory %", "Historial del archivo actual" },
+      { "<leader>gg", "Git Hub — commits, ramas, estado, diffs e historial" },
+      { "<leader>gc", "Abrir GitHub Copilot CLI" },
     },
   },
   {
@@ -188,7 +185,10 @@ local function open()
 end
 
 function M.setup()
-  vim.api.nvim_create_user_command("Commands", open, { desc = "Ver comandos y atajos custom agrupados por categoría" })
+  vim.api.nvim_create_user_command("Commands", open, {
+    desc = "Ver comandos y atajos custom agrupados por categoría",
+    force = true,
+  })
   vim.keymap.set("c", "<CR>", function()
     if vim.fn.getcmdtype() == ":" and vim.fn.getcmdline() == "?" then
       return "<C-u>Commands<CR>"

@@ -5,9 +5,5 @@
 return {
   "sindrets/diffview.nvim",
   cmd = { "DiffviewOpen", "DiffviewClose", "DiffviewFileHistory" },
-  keys = {
-    { "<leader>gd", function() require("config.git").guard("DiffviewOpen")() end, desc = "Git: ver cambios (diff)" },
-    { "<leader>gh", function() require("config.git").guard("DiffviewFileHistory %")() end, desc = "Git: historial del archivo" },
-  },
   opts = {},
 }

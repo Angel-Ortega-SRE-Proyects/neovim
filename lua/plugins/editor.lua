@@ -31,8 +31,8 @@ return {
       -- Popup con el detalle completo del commit (autor, fecha, mensaje
       -- completo, archivos cambiados) — igual a la tarjeta que aparece al
       -- hacer hover sobre el blame en VSCode/GitLens.
-      -- <leader>gb ya lo usa Telescope (git_branches, ver
-      -- lua/plugins/telescope.lua) — el blame de línea va en <leader>gl.
+      -- El modo Git concentra commits, ramas, estado y diffs; el blame de
+      -- línea permanece en <leader>gl.
       vim.keymap.set("n", "<leader>gl", function()
         require("gitsigns").blame_line({ full = true })
       end, { desc = "Detalle del commit de esta línea (blame completo)" })

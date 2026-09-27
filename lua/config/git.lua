@@ -42,6 +42,19 @@ end
 -- (bufferline) para la barra de arriba.
 local diff_stat = nil
 
+local function map_picker_return(prompt_bufnr, map)
+  local actions = require("telescope.actions")
+  local function return_to_git_hub()
+    actions.close(prompt_bufnr)
+    vim.schedule(function()
+      local ok, git_mode = pcall(require, "config.git_mode")
+      if ok then git_mode.back() end
+    end)
+  end
+  map("i", "<Esc>", return_to_git_hub)
+  map("n", "q", return_to_git_hub)
+end
+
 local function refresh_diff_stat()
   local cwd = vim.fn.getcwd()
   vim.system({ "git", "diff", "--numstat", "HEAD" }, { text = true, cwd = cwd }, function(res)
@@ -88,6 +101,7 @@ function M.open_commits()
       map("n", "<CR>", view_diff)
       map("i", "<C-o>", actions.git_checkout)
       map("n", "<C-o>", actions.git_checkout)
+      map_picker_return(prompt_bufnr, map)
       return true
     end,
   })
@@ -114,6 +128,7 @@ function M.open_status()
       map("n", "<CR>", view_diff)
       map("i", "<C-e>", actions.select_default)
       map("n", "<C-e>", actions.select_default)
+      map_picker_return(prompt_bufnr, map)
       return true
     end,
   })

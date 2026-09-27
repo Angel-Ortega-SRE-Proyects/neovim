@@ -16,15 +16,12 @@ return {
         filter = { pattern = "^:%s*!", icon = "", lang = "bash" },
       },
     },
-    messages = {
-      view = "mini",
-      view_error = "mini",
-      view_warn = "mini",
-    },
+    messages = require("config.alerts").options().messages,
     popupmenu = {
       backend = "nui",
     },
     views = {
+      notify = require("config.alerts").options().views.notify,
       popupmenu = {
         relative = "editor",
         position = { row = "76%", col = "50%" },
@@ -44,5 +41,6 @@ return {
   config = function(_, opts)
     vim.o.cmdheight = 1
     require("noice").setup(opts)
+    require("config.alerts").apply_highlights()
   end,
 }

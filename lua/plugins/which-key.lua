@@ -21,8 +21,11 @@ return {
     wk.setup(opts)
     wk.add({
       { "<leader>a", group = "Agent Hub" },
+      { "<leader>aq", desc = "Cerrar AgentHub" },
       { "<leader>f", group = "Find (telescope)" },
-      { "<leader>g", group = "Git" },
+      { "<leader>g", group = "Git / Copilot" },
+      { "<leader>gg", desc = "Abrir modo Git" },
+      { "<leader>gc", desc = "Abrir GitHub Copilot" },
       { "<leader>h", group = "Git hunk (gitsigns)" },
       { "<leader>t", group = "Terminal" },
       { "<leader>l", group = "Diagnósticos/LSP list" },

@@ -17,20 +17,7 @@
 local projects = require("config.projects")
 
 local function open_project_tab(path)
-  local abs = vim.fn.fnamemodify(path, ":p"):gsub("/$", "")
-  for _, tabpage in ipairs(vim.api.nvim_list_tabpages()) do
-    local ok, tab_path = pcall(vim.api.nvim_tabpage_get_var, tabpage, "project_path")
-    if ok and tab_path == abs then
-      vim.api.nvim_set_current_tabpage(tabpage)
-      return
-    end
-  end
-
-  vim.cmd("tabnew")
-  vim.cmd.tcd(vim.fn.fnameescape(abs))
-  projects.record(abs)
-  projects.mark_current(abs)
-  vim.cmd("NvimTreeOpen")
+  projects.open(path)
 end
 
 local function valid_project_path(path)

@@ -17,9 +17,6 @@ return {
       "<cmd>Telescope current_buffer_fuzzy_find<CR>",
       desc = "Buscar SOLO en el archivo abierto",
     },
-    { "<leader>gc", function() require("config.git").open_commits() end, desc = "Git commits (Enter: ver diff)" },
-    { "<leader>gb", function() require("config.git").guard("Telescope git_branches")() end, desc = "Git branches" },
-    { "<leader>gs", function() require("config.git").open_status() end, desc = "Git status (Enter: diff, C-e: abrir archivo)" },
   },
   config = function()
     local telescope = require("telescope")

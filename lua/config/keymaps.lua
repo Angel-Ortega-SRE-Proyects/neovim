@@ -25,3 +25,14 @@ map("v", "K", ":m '<-2<CR>gv=gv", { desc = "Move selection up" })
 -- File explorer / search (placeholders for plugin keymaps set in lua/plugins)
 map("n", "<C-s>", ":update<CR>", { desc = "Guardar cambios" })
 map("i", "<C-s>", "<C-o>:update<CR>", { desc = "Guardar cambios" })
+map("n", "<leader>aq", function()
+  for _, tabpage in ipairs(vim.api.nvim_list_tabpages()) do
+    local ok, is_agent_hub = pcall(vim.api.nvim_tabpage_get_var, tabpage, "agent_hub")
+    if ok and is_agent_hub then
+      vim.api.nvim_set_current_tabpage(tabpage)
+      vim.cmd("tabclose!")
+      return
+    end
+  end
+  vim.notify("AgentHub no está abierto", vim.log.levels.INFO)
+end, { desc = "Cerrar AgentHub sin detener agentes", nowait = true, silent = true })
