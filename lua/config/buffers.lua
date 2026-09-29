@@ -63,6 +63,22 @@ local function apply_profile(args)
   vim.b[args.buf].project_root = vim.g.project_root
 end
 
+local function remove_hidden_file_buffer(args)
+  local buf = args.buf
+  if not vim.api.nvim_buf_is_valid(buf) or vim.bo[buf].buftype ~= "" then
+    return
+  end
+  if vim.bo[buf].modified then
+    return
+  end
+
+  vim.schedule(function()
+    if vim.api.nvim_buf_is_valid(buf) and #vim.fn.win_findbuf(buf) == 0 then
+      pcall(vim.api.nvim_buf_delete, buf, { force = false })
+    end
+  end)
+end
+
 function M.setup()
   local group = vim.api.nvim_create_augroup("ActiveBufferSettings", { clear = true })
   vim.api.nvim_create_autocmd("FileType", {
@@ -70,6 +86,12 @@ function M.setup()
     pattern = "*",
     callback = apply_profile,
     desc = "Aplicar configuración del buffer activo según su tipo",
+  })
+  vim.api.nvim_create_autocmd("BufLeave", {
+    group = group,
+    pattern = "*",
+    callback = remove_hidden_file_buffer,
+    desc = "No acumular archivos ocultos en una misma ventana",
   })
 end
 

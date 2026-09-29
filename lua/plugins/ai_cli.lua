@@ -443,6 +443,7 @@ local function create_changes_panel()
   vim.bo[buf].swapfile = false
   vim.bo[buf].filetype = "agent-changes"
   vim.api.nvim_buf_set_name(buf, "Agent Changes " .. buf)
+  pcall(function() require("config.git_commit").warm() end)
   refresh_changes_panel(buf)
   vim.keymap.set("n", "r", function()
     if refresh_hub_changes then

@@ -169,7 +169,12 @@ function M.open(refresh)
     notify_repo_required()
     return
   end
+  -- Capturar la raíz ANTES de saltar a la tab de Git Hub -- una vez ahí,
+  -- el cwd pasa a ser el de esa tab, no el del proyecto que originó la
+  -- pulsación de <leader>gg.
+  local root = repo_root()
   load_git_plugins()
+  pcall(function() require("config.git_commit").warm() end)
   if not (mode.tabpage and vim.api.nvim_tabpage_is_valid(mode.tabpage)) then
     recover_mode_tab()
   end
@@ -182,12 +187,23 @@ function M.open(refresh)
       mode = {}
     else
       vim.api.nvim_set_current_win(mode.win)
-      if refresh then render(mode.buf) end
+      -- Si <leader>gg se pulsó desde un proyecto distinto al que tiene
+      -- esta tab de Git Hub, re-apuntarla (tcd) al proyecto actual antes
+      -- de re-renderizar -- si no, seguiría operando sobre el repo viejo.
+      if mode.root ~= root then
+        vim.cmd.tcd(vim.fn.fnameescape(root))
+        mode.root = root
+        render(mode.buf)
+      elseif refresh then
+        render(mode.buf)
+      end
       return
     end
   end
   vim.cmd("tabnew")
+  vim.cmd.tcd(vim.fn.fnameescape(root))
   mode.tabpage = vim.api.nvim_get_current_tabpage()
+  mode.root = root
   vim.api.nvim_tabpage_set_var(mode.tabpage, "git_hub", true)
   mode.buf = create_buffer()
   local width = math.min(86, math.max(62, vim.o.columns - 8))

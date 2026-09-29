@@ -42,6 +42,20 @@ return {
       vim.api.nvim_set_hl(0, "NvimTreeOpenedFolderName", { fg = colors.green_bright, bold = true })
       vim.api.nvim_set_hl(0, "NvimTreeEmptyFolderName", { fg = colors.green_dim, italic = true })
       vim.api.nvim_set_hl(0, "NvimTreeIndentMarker", { fg = colors.brown })
+      vim.api.nvim_set_hl(0, "NvimTreeGitDirty", { fg = colors.warn, bold = true })
+      vim.api.nvim_set_hl(0, "NvimTreeGitStaged", { fg = colors.warn, bold = true })
+      vim.api.nvim_set_hl(0, "NvimTreeGitMerge", { fg = colors.warn, bold = true })
+      vim.api.nvim_set_hl(0, "NvimTreeGitDirtyIcon", { fg = colors.warn, bold = true })
+      vim.api.nvim_set_hl(0, "NvimTreeGitStagedIcon", { fg = colors.warn, bold = true })
+      vim.api.nvim_set_hl(0, "NvimTreeGitMergeIcon", { fg = colors.warn, bold = true })
+      vim.api.nvim_set_hl(0, "NvimTreeGitNew", { fg = colors.cyan, bold = true })
+      vim.api.nvim_set_hl(0, "NvimTreeGitNewIcon", { fg = colors.cyan, bold = true })
+      vim.api.nvim_set_hl(0, "NvimTreeGitIgnored", { fg = colors.green_dim })
+      vim.api.nvim_set_hl(0, "NvimTreeGitIgnoredIcon", { fg = colors.green_dim })
+      vim.api.nvim_set_hl(0, "NvimTreeGitDeleted", { fg = colors.error, bold = true })
+      vim.api.nvim_set_hl(0, "NvimTreeGitDeletedIcon", { fg = colors.error, bold = true })
+      vim.api.nvim_set_hl(0, "NvimTreeGitRenamed", { fg = colors.green, bold = true })
+      vim.api.nvim_set_hl(0, "NvimTreeGitRenamedIcon", { fg = colors.green, bold = true })
     end
     set_highlights()
     vim.api.nvim_create_autocmd("ColorScheme", {
@@ -94,6 +108,15 @@ return {
             empty_open = "",
             symlink = "",
             symlink_open = "",
+          },
+          git = {
+            unstaged = "M",
+            staged = "M",
+            unmerged = "M",
+            renamed = "R",
+            untracked = "?",
+            deleted = "D",
+            ignored = "",
           },
         },
       },

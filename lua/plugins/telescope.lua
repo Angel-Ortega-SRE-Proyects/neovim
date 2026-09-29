@@ -72,6 +72,26 @@ return {
           },
         },
       },
+      pickers = {
+        find_files = {
+          hidden = true,
+          no_ignore = true,
+          additional_args = function()
+            return { "--glob", "!**/.git/**" }
+          end,
+          file_ignore_patterns = { "^%.git/" },
+        },
+        live_grep = {
+          additional_args = function()
+            return { "--hidden", "--no-ignore", "--glob", "!**/.git/**" }
+          end,
+        },
+        grep_string = {
+          additional_args = function()
+            return { "--hidden", "--no-ignore", "--glob", "!**/.git/**" }
+          end,
+        },
+      },
     })
     pcall(telescope.load_extension, "fzf")
 

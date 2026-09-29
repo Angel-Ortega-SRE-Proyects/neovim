@@ -11,7 +11,18 @@ vim.g.loaded_tarPlugin = 1
 
 local i18n = require("config.i18n")
 require("config.options")
-require("config.keymaps")
+package.loaded["config.keymaps"] = nil
+local keymaps = require("config.keymaps")
+keymaps.setup_window_navigation()
+keymaps.setup_format_menu()
+keymaps.setup_explorer_navigation()
+local ok_which_key, which_key = pcall(require, "which-key")
+if ok_which_key then
+  which_key.add({
+    { "<leader>s", hidden = true },
+    { "<leader>S", hidden = true },
+  })
+end
 require("config.project_settings").setup()
 require("config.buffers").setup()
 require("config.autocmds")
@@ -20,6 +31,7 @@ require("config.dashboard").setup()
 require("config.statusline").setup()
 require("config.topline").setup()
 require("config.lazy")
+require("config.explorer").apply()
 package.loaded["config.git_mode"] = nil
 package.loaded["config.git_commit"] = nil
 require("config.git_mode").setup_keymaps()
@@ -74,6 +86,8 @@ vim.api.nvim_create_user_command("ConfigReload", function()
   package.loaded["config.git"] = nil
   require("config.git").reapply_view_navigation()
   reload_theme_module().reload()
+  local wk_ok, wk_plugin = pcall(require, "plugins.which-key")
+  if wk_ok and type(wk_plugin.refresh_i18n) == "function" then wk_plugin.refresh_i18n() end
   vim.api.nvim_echo({
     { i18n.t("Configuración recargada: "), "Normal" },
     { config_file, "String" },

@@ -34,6 +34,31 @@ describe("specs de plugins (lazy.nvim)", function()
     assert.is_false(spec.opts.suggestion.keymap.accept)
     assert.equals("<C-]>", spec.opts.suggestion.keymap.dismiss)
   end)
+
+  it("persistence no registra atajos con Espacio", function()
+    local spec = require("plugins.persistence")
+    assert.is_nil(spec.keys)
+  end)
+
+  it("Conform formatea JSON, HTML, JavaScript y CSS", function()
+    local spec = require("plugins.conform")
+    for _, filetype in ipairs({ "json", "html", "javascript", "css" }) do
+      assert.is_table(spec.opts.formatters_by_ft[filetype])
+      assert.equals("prettier", spec.opts.formatters_by_ft[filetype][1])
+    end
+    assert.equals("<leader>fm", spec.keys[1][1])
+  end)
+
+  it("NvimTree marca cambios con M", function()
+    local spec = require("plugins.explorer")
+    local git = spec.opts.renderer.icons.glyphs.git
+    assert.equals("M", git.unstaged)
+    assert.equals("M", git.staged)
+    assert.equals("M", git.unmerged)
+    assert.equals("?", git.untracked)
+    assert.equals("", git.ignored)
+  end)
+
 end)
 
 describe("terminales", function()

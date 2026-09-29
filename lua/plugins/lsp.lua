@@ -13,7 +13,7 @@ return {
       ensure_installed = {
         "lua_ls",
         -- YAML/JSON + devops
-        "yamlls", "jsonls", "dockerls", "terraformls", "bashls",
+        "yamlls", "jsonls", "html", "cssls", "dockerls", "terraformls", "bashls",
         -- Lenguajes de propósito general
         "pyright", "ruff", "ts_ls", "gopls", "jdtls", "omnisharp",
       },
@@ -102,7 +102,7 @@ return {
       -- con la config default de nvim-lspconfig, sin nada para pisar.
       vim.lsp.enable({
         "lua_ls",
-        "yamlls", "jsonls", "dockerls", "terraformls", "bashls",
+        "yamlls", "jsonls", "html", "cssls", "dockerls", "terraformls", "bashls",
         "pyright", "ruff", "ts_ls", "gopls", "jdtls", "omnisharp",
       })
     end,

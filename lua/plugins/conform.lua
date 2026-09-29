@@ -5,12 +5,24 @@ return {
   "stevearc/conform.nvim",
   event = { "BufWritePre" },
   cmd = "ConformInfo",
+  keys = {
+    {
+      "<leader>fm",
+      function()
+        require("conform").format({ async = true, lsp_format = "fallback" })
+      end,
+      mode = { "n", "v" },
+      desc = "Formatear archivo o selección",
+    },
+  },
   opts = {
     formatters_by_ft = {
       lua = { "stylua" },
       bash = { "shfmt" },
       sh = { "shfmt" },
       json = { "prettier" },
+      html = { "prettier" },
+      css = { "prettier" },
       yaml = { "prettier" },
       markdown = { "prettier" },
       dockerfile = { "prettier" },

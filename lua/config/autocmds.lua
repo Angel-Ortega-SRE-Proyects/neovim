@@ -94,14 +94,14 @@ autocmd("TermOpen", {
   end,
 })
 
--- Por defecto, <Esc> en modo terminal no hace nada (para no robarle el Esc
--- a programas que corras ahí adentro, como un vim anidado, fzf o un agente
--- de IA); hay que usar <C-\><C-n>. Se mapea <C-q> a eso para salir a modo
--- normal sin tener que hacer `exit`, dejando <Esc> libre para el programa
--- que corra dentro de la terminal.
+-- <Esc> en modo terminal sale al modo normal para que los atajos globales
+-- (incluidos los que empiezan con <leader>) funcionen también dentro de una
+-- terminal abierta en el área del editor. <C-q> queda como alternativa
+-- explícita para terminales que necesiten conservar el comportamiento de Esc.
 autocmd("TermOpen", {
   group = augroup("TermEscToNormal", { clear = true }),
   callback = function(args)
+    vim.keymap.set("t", "<Esc>", [[<C-\><C-n>]], { buffer = args.buf, desc = "Salir a modo normal" })
     vim.keymap.set("t", "<C-q>", [[<C-\><C-n>]], { buffer = args.buf, desc = "Salir a modo normal" })
   end,
 })

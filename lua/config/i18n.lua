@@ -165,7 +165,6 @@ local common = {
   ["Terminal"] = { es = "Terminal", en = "Terminal" },
   ["Proyectos"] = { es = "Proyectos", en = "Projects" },
   ["Markdown"] = { es = "Markdown", en = "Markdown" },
-  ["Sesión (persistence)"] = { es = "Sesión (persistence)", en = "Session (persistence)" },
   ["Git / Copilot"] = { es = "Git / Copilot", en = "Git / Copilot" },
   ["Abrir modo Git"] = { es = "Abrir modo Git", en = "Open Git mode" },
   ["Abrir GitHub Copilot"] = { es = "Abrir GitHub Copilot", en = "Open GitHub Copilot" },
@@ -188,6 +187,127 @@ local common = {
   ["agregar repositorio"] = { es = "agregar repositorio", en = "add repository" },
   ["volver a cambios"] = { es = "volver a cambios", en = "back to changes" },
   ["actualizar diff"] = { es = "actualizar diff", en = "refresh diff" },
+
+  -- git_commit.lua: prompt de Copilot y estados del commit.
+  ["Copilot: analiza el diff completo (staged) de abajo y genera un commit Conventional Commits."] = {
+    es = "Copilot: analiza el diff completo (staged) de abajo y genera un commit Conventional Commits.",
+    en = "Copilot: analyze the full (staged) diff below and generate a Conventional Commit.",
+  },
+  ["Copilot: analiza el diff completo de abajo y genera un commit Conventional Commits."] = {
+    es = "Copilot: analiza el diff completo de abajo y genera un commit Conventional Commits.",
+    en = "Copilot: analyze the full diff below and generate a Conventional Commit.",
+  },
+  ["Título (línea 1): tipo(scope): descripción corta en imperativo, sin punto final."] = {
+    es = "Título (línea 1): tipo(scope): descripción corta en imperativo, sin punto final.",
+    en = "Title (line 1): type(scope): short imperative description, no trailing period.",
+  },
+  ["  Tipo: usa 'feat' SOLO si el diff agrega funcionalidad nueva. Para todo lo demás"] = {
+    es = "  Tipo: usa 'feat' SOLO si el diff agrega funcionalidad nueva. Para todo lo demás",
+    en = "  Type: use 'feat' ONLY if the diff adds new functionality. For everything else",
+  },
+  ["  (correcciones, ajustes de comportamiento, refactor, estilo, docs, tests, tareas"] = {
+    es = "  (correcciones, ajustes de comportamiento, refactor, estilo, docs, tests, tareas",
+    en = "  (bug fixes, behavior adjustments, refactors, style, docs, tests, maintenance",
+  },
+  ["  de mantenimiento) usa 'fix', 'refactor', 'style', 'docs', 'test' o 'chore' según"] = {
+    es = "  de mantenimiento) usa 'fix', 'refactor', 'style', 'docs', 'test' o 'chore' según",
+    en = "  chores) use 'fix', 'refactor', 'style', 'docs', 'test' or 'chore' as",
+  },
+  ["  corresponda -- nunca 'feat' para un ajuste."] = {
+    es = "  corresponda -- nunca 'feat' para un ajuste.",
+    en = "  appropriate -- never 'feat' for an adjustment.",
+  },
+  ["  Scope: nombre corto del módulo/área principal tocada por el diff."] = {
+    es = "  Scope: nombre corto del módulo/área principal tocada por el diff.",
+    en = "  Scope: short name of the main module/area touched by the diff.",
+  },
+  ["Cuerpo: deja una línea en blanco tras el título. Si el diff mezcla features nuevas"] = {
+    es = "Cuerpo: deja una línea en blanco tras el título. Si el diff mezcla features nuevas",
+    en = "Body: leave a blank line after the title. If the diff mixes new features",
+  },
+  ["  con ajustes/correcciones, agrega dos listas con viñetas '-':"] = {
+    es = "  con ajustes/correcciones, agrega dos listas con viñetas '-':",
+    en = "  with adjustments/fixes, add two bullet ('-') lists:",
+  },
+  ["Features:"] = { es = "Features:", en = "Features:" },
+  ["Ajustes:"] = { es = "Ajustes:", en = "Adjustments:" },
+  ["  Si el diff es solo de un tipo, incluí solo esa lista (o ninguna si el título ya"] = {
+    es = "  Si el diff es solo de un tipo, incluí solo esa lista (o ninguna si el título ya",
+    en = "  If the diff is only one kind, include just that list (or none if the title",
+  },
+  ["  describe todo el cambio). No inventes cambios que no estén en el diff."] = {
+    es = "  describe todo el cambio). No inventes cambios que no estén en el diff.",
+    en = "  already covers the change). Do not invent changes not present in the diff.",
+  },
+  ["Hay cambios staged listos para commit."] = {
+    es = "Hay cambios staged listos para commit.",
+    en = "There are staged changes ready to commit.",
+  },
+  ["Aviso: estos cambios aún no están staged; agrégalos antes de guardar."] = {
+    es = "Aviso: estos cambios aún no están staged; agrégalos antes de guardar.",
+    en = "Warning: these changes are not staged yet; stage them before saving.",
+  },
+  ["--- diff completo (%d líneas) ---"] = {
+    es = "--- diff completo (%d líneas) ---",
+    en = "--- full diff (%d lines) ---",
+  },
+  ["... diff truncado (%d de %d líneas) para no saturar el contexto de Copilot ..."] = {
+    es = "... diff truncado (%d de %d líneas) para no saturar el contexto de Copilot ...",
+    en = "... diff truncated (%d of %d lines) to avoid overloading Copilot's context ...",
+  },
+  ["--- fin del diff ---"] = { es = "--- fin del diff ---", en = "--- end of diff ---" },
+  ["Escribe únicamente el mensaje del commit en la línea siguiente."] = {
+    es = "Escribe únicamente el mensaje del commit en la línea siguiente.",
+    en = "Write only the commit message on the next line.",
+  },
+  ["Ctrl-G genera con Copilot · Tab acepta · Ctrl-] descarta"] = {
+    es = "Ctrl-G genera con Copilot · Tab acepta · Ctrl-] descarta",
+    en = "Ctrl-G generates with Copilot · Tab accepts · Ctrl-] discards",
+  },
+  ["Escribe el mensaje manualmente o solicita una sugerencia."] = {
+    es = "Escribe el mensaje manualmente o solicita una sugerencia.",
+    en = "Write the message by hand or request a suggestion.",
+  },
+  ["Generando mensaje con Copilot · %s"] = {
+    es = "Generando mensaje con Copilot · %s",
+    en = "Generating message with Copilot · %s",
+  },
+  ["sugerencia lista, Tab para aceptar"] = {
+    es = "sugerencia lista, Tab para aceptar",
+    en = "suggestion ready, Tab to accept",
+  },
+  ["Copilot sin respuesta, revisa con Ctrl-G"] = {
+    es = "Copilot sin respuesta, revisa con Ctrl-G",
+    en = "Copilot did not respond, retry with Ctrl-G",
+  },
+  ["No hay cambios para describir"] = { es = "No hay cambios para describir", en = "No changes to describe" },
+  ["Copilot no está cargado. Ejecuta :Copilot status."] = {
+    es = "Copilot no está cargado. Ejecuta :Copilot status.",
+    en = "Copilot is not loaded. Run :Copilot status.",
+  },
+  ["El commit necesita un mensaje"] = { es = "El commit necesita un mensaje", en = "The commit needs a message" },
+  ["No se pudo crear el commit"] = { es = "No se pudo crear el commit", en = "Could not create the commit" },
+  ["Commit creado"] = { es = "Commit creado", en = "Commit created" },
+  ["Copilot no generó una sugerencia: "] = {
+    es = "Copilot no generó una sugerencia: ",
+    en = "Copilot did not generate a suggestion: ",
+  },
+  ["\nBuffer: "] = { es = "\nBuffer: ", en = "\nBuffer: " },
+  ["\nModo: "] = { es = "\nModo: ", en = "\nMode: " },
+  ["\nLog: "] = { es = "\nLog: ", en = "\nLog: " },
+  ["\nSe insertó una propuesta local: "] = {
+    es = "\nSe insertó una propuesta local: ",
+    en = "\nA local suggestion was inserted: ",
+  },
+  ["sin respuesta"] = { es = "sin respuesta", en = "no response" },
+  ["adjunto"] = { es = "adjunto", en = "attached" },
+  ["no adjunto"] = { es = "no adjunto", en = "not attached" },
+  ["desconocido"] = { es = "desconocido", en = "unknown" },
+  ["Cancelar commit"] = { es = "Cancelar commit", en = "Cancel commit" },
+  ["Generar mensaje de commit con Copilot"] = {
+    es = "Generar mensaje de commit con Copilot",
+    en = "Generate commit message with Copilot",
+  },
 }
 
 for key, value in pairs(common) do
@@ -221,10 +341,23 @@ function M.translate_lines(lines)
   return vim.tbl_map(M.translate_line, lines)
 end
 
+-- Mensajes nativos de Neovim (diálogos de swapfile, :help, errores E***)
+-- no pasan por M.translations -- vienen de los catálogos gettext del
+-- propio Neovim (/usr/share/locale/<lang>/LC_MESSAGES/nvim.mo). Cambiar
+-- `:language messages` los sincroniza con el mismo toggle es/en.
+M.native_locales = { es = "es_ES.UTF-8", en = "en_US.UTF-8" }
+
+local function apply_native_language(language)
+  local locale = M.native_locales[language]
+  if not locale then return end
+  pcall(vim.cmd, "language messages " .. locale)
+end
+
 local function load_saved_language()
   local ok, saved = pcall(vim.fn.readfile, M.path, "b")
   local language = ok and saved[1] and vim.trim(saved[1]) or "es"
   M.lang = M.languages[language] and language or "es"
+  apply_native_language(M.lang)
 end
 
 local function save_language(language)
@@ -237,6 +370,7 @@ function M.set(language)
     vim.notify("Idioma no disponible: " .. language, vim.log.levels.WARN)
     return false
   end
+  apply_native_language(language)
   M.lang = language
   save_language(language)
   if vim.fn.exists(":ConfigReload") == 2 then vim.cmd("ConfigReload") end

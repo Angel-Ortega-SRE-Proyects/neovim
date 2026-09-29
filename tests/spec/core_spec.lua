@@ -38,6 +38,8 @@ describe("atajos globales", function()
     assert.equals("<gv", rhs("<", "v").rhs)
     assert.equals(">gv", rhs(">", "v").rhs)
     assert.equals("<cmd>ThemeSelect<CR>", rhs(" uc").rhs)
+    assert.is_function(rhs(" <Left>").callback)
+    assert.is_function(rhs(" ep").callback)
     assert.equals("<C-c>", rhs("<Esc>", "c").rhs)
   end)
 
@@ -79,6 +81,21 @@ describe("autocomandos", function()
     assert.equals(3, vim.api.nvim_win_get_cursor(0)[1])
   end)
 
+  it("elimina el archivo anterior al abrir otro en la misma ventana", function()
+    local first = h.tempdir() .. "/first.txt"
+    local second = h.tempdir() .. "/second.txt"
+    h.write(first, { "primero" })
+    h.write(second, { "segundo" })
+
+    vim.cmd("edit " .. vim.fn.fnameescape(first))
+    local first_buf = vim.api.nvim_get_current_buf()
+    vim.cmd("edit " .. vim.fn.fnameescape(second))
+    vim.wait(20)
+
+    assert.is_false(vim.api.nvim_buf_is_valid(first_buf))
+    assert.equals(second, vim.api.nvim_buf_get_name(0))
+  end)
+
   it("abre binarios y documentos con la app del sistema", function()
     local autocmds = vim.api.nvim_get_autocmds({ group = "OpenExternally", event = "BufReadCmd" })
     local patterns = vim.tbl_map(function(autocmd) return autocmd.pattern end, autocmds)
@@ -87,10 +104,11 @@ describe("autocomandos", function()
     end
   end)
 
-  it("quita números y signcolumn en terminales y mapea <C-q>", function()
+  it("quita números y signcolumn en terminales y permite salir con Esc", function()
     vim.cmd("terminal")
     assert.is_false(vim.wo.number)
     assert.equals("no", vim.wo.signcolumn)
+    assert.equals("<C-\\><C-n>", vim.fn.maparg("<Esc>", "t", false, true).rhs)
     assert.equals("<C-\\><C-n>", vim.fn.maparg("<C-Q>", "t", false, true).rhs)
     vim.fn.jobstop(vim.b.terminal_job_id)
   end)

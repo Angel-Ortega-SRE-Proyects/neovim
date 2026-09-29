@@ -6,3 +6,39 @@
 
 # archivos sueltos de prueba
 hello.txt
+
+# configuración local de asistentes y editores
+/.claude/
+/.claudeignore
+/.vscode/
+/.idea/
+/.mcp.json
+/.higpertext/
+
+# entornos virtuales y dependencias locales
+.venv/
+venv/
+env/
+ENV/
+node_modules/
+
+# secretos y variables de entorno locales
+.env
+.env.*
+!.env.example
+
+# cachés y archivos generados
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+/.higpertext/__cache__/
+
+# archivos temporales del editor y del sistema
+*.log
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
