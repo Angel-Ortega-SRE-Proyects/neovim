@@ -4,6 +4,7 @@
 -- logo + botones estilo LazyVim, así que esto queda como :Commands para
 -- consultarlo cuando quieras. Edita GROUPS para mantenerla al día.
 local M = {}
+local i18n = require("config.i18n")
 
 local BUILTIN_COMMANDS = {
   { ":update", "Guardar el archivo actual" },
@@ -145,7 +146,7 @@ local function build_lines()
   table.insert(lines, "")
   table.insert(lines, "  ↑/↓ mover · PageUp/PageDown desplazar · q/Esc cerrar · :command lista completa")
 
-  return lines
+  return i18n.translate_lines(lines)
 end
 
 local function open()

@@ -1,3 +1,5 @@
+local t = require("config.i18n").t
+
 return {
   "nvim-telescope/telescope.nvim",
   branch = "0.1.x",
@@ -7,15 +9,15 @@ return {
   },
   cmd = { "Telescope", "Gc", "Gb", "Gs" },
   keys = {
-    { "<C-f>", "<cmd>Telescope find_files<CR>", mode = "n", desc = "Buscar y abrir archivos" },
-    { "<leader>ff", "<cmd>Telescope find_files<CR>", desc = "Find files" },
-    { "<leader>fg", "<cmd>Telescope live_grep<CR>", desc = "Live grep (toda la carpeta actual)" },
-    { "<leader>fb", "<cmd>Telescope buffers<CR>", desc = "Buffers" },
-    { "<leader>fo", "<cmd>Telescope oldfiles<CR>", desc = "Recent files" },
+    { "<C-f>", "<cmd>Telescope find_files<CR>", mode = "n", desc = t("Buscar y abrir archivos") },
+    { "<leader>ff", "<cmd>Telescope find_files<CR>", desc = t("Buscar archivos") },
+    { "<leader>fg", "<cmd>Telescope live_grep<CR>", desc = t("Buscar texto (carpeta actual)") },
+    { "<leader>fb", "<cmd>Telescope buffers<CR>", desc = t("Búferes abiertos") },
+    { "<leader>fo", "<cmd>Telescope oldfiles<CR>", desc = t("Archivos recientes") },
     {
       "<leader>fs",
       "<cmd>Telescope current_buffer_fuzzy_find<CR>",
-      desc = "Buscar SOLO en el archivo abierto",
+      desc = t("Buscar SOLO en el archivo abierto"),
     },
   },
   config = function()

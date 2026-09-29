@@ -12,7 +12,7 @@
 --   dentro del picker: Enter = ir, <C-a> = agregar carpeta nueva a mano,
 --   <C-r> = ponerle un nombre propio (ej. "API backend" en vez de la ruta
 --   completa), <C-x> = sacarla de la lista (no borra la carpeta, solo el
---   recuerdo)
+--   recuerdo), :ProjectPin = fijar/desfijar el proyecto actual en Agent Hub.
 
 local projects = require("config.projects")
 
@@ -173,6 +173,12 @@ vim.api.nvim_create_user_command("ProjectRename", function(opts)
     vim.ui.input({ prompt = "Nombre del proyecto (vacío = nombre de carpeta): ", default = projects.current_name() or "" }, rename)
   end
 end, { nargs = "*", desc = "Asignar un nombre al proyecto actual" })
+vim.api.nvim_create_user_command("ProjectPin", function(opts)
+  local path = opts.args ~= "" and opts.args or vim.fn.getcwd()
+  local pinned = projects.toggle_pin(path)
+  local label = vim.fn.fnamemodify(vim.fn.fnamemodify(path, ":p"), ":~")
+  vim.notify((pinned and "Proyecto fijado: " or "Proyecto desfijado: ") .. label)
+end, { nargs = "?", complete = "dir", desc = "Fijar/desfijar proyecto en Agent Hub" })
 vim.cmd("cnoreabbrev projects Projects")
 vim.keymap.set("n", "<leader>p", open_projects_picker, { desc = "Abrir proyecto en una pestaña nueva" })
 vim.keymap.set("n", "<leader>pn", prompt_new_project, { desc = "Crear y abrir proyecto" })

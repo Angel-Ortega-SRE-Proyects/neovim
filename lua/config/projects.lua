@@ -29,6 +29,7 @@ local function read_all()
 end
 
 local function write_all(list)
+  vim.fn.mkdir(vim.fn.fnamemodify(FILE, ":h"), "p")
   local f = io.open(FILE, "w")
   if not f then
     return
@@ -39,6 +40,29 @@ end
 
 local function display_name(entry)
   return entry.name or vim.fn.fnamemodify(entry.path, ":t")
+end
+
+local function sort_entries(data)
+  table.sort(data, function(a, b)
+    if (a.pinned == true) ~= (b.pinned == true) then
+      return a.pinned == true
+    end
+    return (a.last or 0) > (b.last or 0)
+  end)
+end
+
+local function trim_entries(data)
+  while #data > MAX_ENTRIES do
+    local removable
+    for index = #data, 1, -1 do
+      if data[index].pinned ~= true then
+        removable = index
+        break
+      end
+    end
+    if not removable then break end
+    table.remove(data, removable)
+  end
 end
 
 function M.name_for(path)
@@ -86,10 +110,10 @@ local function tab_title(tabpage, tabnr)
   return vim.fn.fnamemodify(vim.fn.getcwd(-1, tabnr), ":t")
 end
 
---- Lista de { path, last } ordenada por más reciente primero.
+--- Lista de { path, last, pinned } con fijados primero y luego por acceso.
 function M.list()
   local data = read_all()
-  table.sort(data, function(a, b) return (a.last or 0) > (b.last or 0) end)
+  sort_entries(data)
   return data
 end
 
@@ -114,12 +138,46 @@ function M.record(path)
     table.insert(data, { path = abs, last = os.time() })
   end
 
-  table.sort(data, function(a, b) return (a.last or 0) > (b.last or 0) end)
-  while #data > MAX_ENTRIES do
-    table.remove(data)
-  end
+  sort_entries(data)
+  trim_entries(data)
 
   write_all(data)
+end
+
+--- Fija o desfija una carpeta registrada en Agent Hub.
+function M.set_pinned(path, pinned)
+  local abs = normalize(path)
+  if vim.fn.isdirectory(abs) ~= 1 then
+    return false
+  end
+
+  local data = read_all()
+  for _, entry in ipairs(data) do
+    if entry.path == abs then
+      entry.pinned = pinned == true
+      sort_entries(data)
+      trim_entries(data)
+      write_all(data)
+      return entry.pinned
+    end
+  end
+
+  table.insert(data, { path = abs, last = os.time(), pinned = pinned == true })
+  sort_entries(data)
+  trim_entries(data)
+  write_all(data)
+  return pinned == true
+end
+
+--- Alterna el estado fijo de una carpeta, registrándola si todavía no existe.
+function M.toggle_pin(path)
+  local abs = normalize(path)
+  for _, entry in ipairs(read_all()) do
+    if entry.path == abs then
+      return M.set_pinned(abs, not entry.pinned)
+    end
+  end
+  return M.set_pinned(abs, true)
 end
 
 --- Alias custom para mostrar en el picker en vez de la ruta (ej. "API

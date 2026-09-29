@@ -1,7 +1,31 @@
+local util = require("config.agent_sessions.util")
+
 local M = {}
+local ACTIVE_WINDOW = 15 * 60
+local EXECUTING_WINDOW = 2
 
 local function session_root()
   return vim.fn.expand("~/.codex/sessions")
+end
+
+local function lock_path(session_id)
+  return vim.fn.expand("~/.codex/thread-writer-locks/" .. session_id .. ".lock")
+end
+
+local function lock_last_seen(session_id, updated_at)
+  local lock = vim.uv.fs_stat(lock_path(session_id))
+  if not lock or not lock.mtime then return 0 end
+  return math.max(lock.mtime.sec or 0, updated_at or 0)
+end
+
+local function is_recent(session_id, updated_at)
+  local last_seen = lock_last_seen(session_id, updated_at)
+  return last_seen > 0 and os.time() - last_seen <= ACTIVE_WINDOW
+end
+
+local function is_executing(session_id, updated_at)
+  local last_seen = lock_last_seen(session_id, updated_at)
+  return last_seen > 0 and os.time() - last_seen <= EXECUTING_WINDOW
 end
 
 local function compact_title(text, fallback)
@@ -69,14 +93,23 @@ local function read_metadata(path, stat)
   if cwd ~= "/" then cwd = cwd:gsub("/$", "") end
 
   return {
+    path = path,
     name = label .. " [" .. short_id .. "]",
+    kind = "Codex",
+    short_id = short_id,
     cmd = { "codex", "resume", metadata.id },
     cwd = cwd,
     action = "agent",
     external = true,
     session_id = metadata.id,
+    active = is_recent(metadata.id, stat.mtime.sec),
     updated_at = stat.mtime.sec,
   }
+end
+
+function M.remove(session)
+  if not session or type(session.path) ~= "string" then return false end
+  return os.remove(session.path) ~= nil
 end
 
 local function scan_directory(path, sessions)
@@ -89,11 +122,10 @@ local function scan_directory(path, sessions)
     if kind == "directory" then
       scan_directory(child, sessions)
     elseif kind == "file" and name:match("%.jsonl$") then
-      local stat = vim.uv.fs_stat(child)
-      if stat then
-        local session = read_metadata(child, stat)
-        if session then table.insert(sessions, session) end
-      end
+      local session = util.cached(child, function(path, stat)
+        return read_metadata(path, stat) or false
+      end)
+      if session then table.insert(sessions, vim.deepcopy(session)) end
     end
   end
 end
@@ -139,6 +171,16 @@ function M.grouped()
     return left.updated_at > right.updated_at
   end)
   return groups
+end
+
+function M.status(session)
+  if not session or not session.session_id then
+    return session and session.active and "activo" or "detenido"
+  end
+  if is_executing(session.session_id, session.updated_at or 0) then
+    return "ejecutando"
+  end
+  return is_recent(session.session_id, session.updated_at or 0) and "activo" or "detenido"
 end
 
 return M

@@ -2,6 +2,8 @@
 -- argumentos. Reemplaza la vista de texto plano de lua/config/dashboard.lua
 -- (esa queda como comando :Commands, ver ahí).
 
+local t = require("config.i18n").t
+
 return {
   "folke/snacks.nvim",
   priority = 1000,
@@ -19,13 +21,13 @@ return {
           "╚═════╝ ╚══════╝  ╚═══╝  ╚══════╝╚══════╝ ╚═════╝ ╚═════╝ ╚═╝     ╚══════╝",
         }, "\n"),
         keys = {
-          { icon = " ", key = "f", desc = "Buscar archivos", action = ":Telescope find_files" },
-          { icon = " ", key = "g", desc = "Buscar texto (live grep)", action = ":Telescope live_grep" },
-          { icon = " ", key = "r", desc = "Archivos recientes", action = ":Telescope oldfiles" },
-          { icon = " ", key = "p", desc = "Carpetas recientes (Open Recent)", action = ":Projects" },
-          { icon = " ", key = "e", desc = "Explorador de archivos", action = ":NvimTreeFocus" },
-          { icon = " ", key = "n", desc = "Nuevo archivo", action = ":ene | startinsert" },
-          { icon = " ", key = "q", desc = "Salir", action = ":confirm qa" },
+          { icon = " ", key = "f", desc = t("Buscar archivos"), action = ":Telescope find_files" },
+          { icon = " ", key = "g", desc = t("Buscar texto (búsqueda en vivo)"), action = ":Telescope live_grep" },
+          { icon = " ", key = "r", desc = t("Archivos recientes"), action = ":Telescope oldfiles" },
+          { icon = " ", key = "p", desc = t("Carpetas recientes"), action = ":Projects" },
+          { icon = " ", key = "e", desc = t("Explorador de archivos"), action = ":NvimTreeFocus" },
+          { icon = " ", key = "n", desc = t("Nuevo archivo"), action = ":ene | startinsert" },
+          { icon = " ", key = "q", desc = t("Salir"), action = ":confirm qa" },
         },
       },
     },

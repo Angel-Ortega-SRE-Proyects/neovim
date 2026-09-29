@@ -33,6 +33,12 @@ local function estimate_cost(tokens, tool_key)
   return (tokens / 1000000) * rate
 end
 
+--- Literal SQL entre comillas simples (las internas se duplican). No usar
+--- shellescape: produce '\'' para una comilla, que no es SQL válido.
+function M.sql_quote(text)
+  return "'" .. tostring(text):gsub("'", "''") .. "'"
+end
+
 local function set(name, tokens, cost, exact_cost)
   M.data[name] = { tokens = tokens or 0, cost = cost, exact_cost = exact_cost or false }
 end
@@ -195,7 +201,7 @@ local function refresh_opencode(cwd)
   local sql = string.format(
     "SELECT tokens_input+tokens_output+tokens_reasoning+tokens_cache_read+tokens_cache_write, cost "
       .. "FROM session WHERE directory = %s ORDER BY time_updated DESC LIMIT 1;",
-    vim.fn.shellescape(cwd)
+    M.sql_quote(cwd)
   )
   vim.system({ "sqlite3", "-separator", "|", db, sql }, { text = true }, function(res)
     vim.schedule(function()
@@ -272,7 +278,7 @@ local function refresh_copilot_cli(cwd)
     "SELECT SUM(input_tokens+output_tokens+COALESCE(cache_read_tokens,0)+COALESCE(cache_write_tokens,0)) "
       .. "FROM assistant_usage_events WHERE session_id = ("
       .. "SELECT id FROM sessions WHERE cwd = %s ORDER BY updated_at DESC LIMIT 1);",
-    vim.fn.shellescape(cwd)
+    M.sql_quote(cwd)
   )
   vim.system({ "sqlite3", db, sql }, { text = true }, function(res)
     vim.schedule(function()

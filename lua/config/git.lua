@@ -2,6 +2,38 @@
 -- Telescope/Diffview cuando el cwd actual no es un repositorio git.
 local M = {}
 
+local function return_from_git_view()
+  local ok, git_mode = pcall(require, "config.git_mode")
+  if ok then
+    git_mode.back()
+  else
+    pcall(vim.cmd, "DiffviewClose")
+  end
+end
+
+local function attach_git_view_navigation(buf)
+  if type(buf) ~= "number" or not vim.api.nvim_buf_is_valid(buf)
+      or not vim.bo[buf].filetype:match("^Diffview") then return end
+  vim.keymap.set("n", "q", return_from_git_view,
+    { buffer = buf, desc = "Volver al menú Git", nowait = true, silent = true })
+  vim.keymap.set("n", "<Esc>", return_from_git_view,
+    { buffer = buf, desc = "Volver al menú Git", nowait = true, silent = true })
+  vim.keymap.set("n", "<leader>gb", return_from_git_view,
+    { buffer = buf, desc = "Volver al árbol Git", nowait = true, silent = true })
+end
+
+vim.api.nvim_create_autocmd({ "FileType", "BufEnter", "WinEnter" }, {
+  group = vim.api.nvim_create_augroup("GitViewNavigation", { clear = true }),
+  pattern = "*",
+  callback = function(args) attach_git_view_navigation(args.buf) end,
+})
+
+function M.reapply_view_navigation()
+  for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+    attach_git_view_navigation(buf)
+  end
+end
+
 function M.in_repo()
   vim.fn.system("git rev-parse --is-inside-work-tree")
   return vim.v.shell_error == 0

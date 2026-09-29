@@ -21,6 +21,14 @@ return {
   event = "InsertEnter",
   dependencies = { "copilotlsp-nvim/copilot-lsp" },
   opts = {
+    logger = {
+      file = vim.fn.stdpath("log") .. "/copilot-lua.log",
+      file_log_level = vim.log.levels.TRACE,
+      print_log_level = vim.log.levels.WARN,
+      trace_lsp = "verbose",
+      trace_lsp_progress = true,
+      log_lsp_messages = true,
+    },
     suggestion = {
       enabled = true,
       auto_trigger = true,

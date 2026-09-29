@@ -17,11 +17,14 @@
 --   :Term ls -la     abre la pestaña y ejecuta ese comando
 --   :Tb ls -la       abre el pane de tmux y ejecuta ese comando
 local term_bufnr = nil
+local t = require("config.i18n").t
 
 local function open_tab_terminal(args)
   if term_bufnr and vim.api.nvim_buf_is_valid(term_bufnr) then
-    local win = vim.fn.bufwinid(term_bufnr)
-    if win == -1 then
+    -- win_findbuf busca en todas las pestañas (bufwinid solo en la actual y
+    -- duplicaba la pestaña al llamar :Term desde otra).
+    local win = vim.fn.win_findbuf(term_bufnr)[1]
+    if not win then
       vim.cmd("tabnew")
       vim.cmd("buffer " .. term_bufnr)
     else
@@ -87,7 +90,7 @@ vim.api.nvim_create_user_command("Tb", function(cmd_opts)
   if cmd_opts.args ~= "" then
     vim.fn.system({ "tmux", "send-keys", "-t", tmux_bottom_pane_id, cmd_opts.args, "Enter" })
   end
-end, { nargs = "*", desc = "Pane de tmux real abajo (opcional: comando a ejecutar)" })
+end, { nargs = "*", desc = "Panel de tmux real abajo (opcional: comando a ejecutar)" })
 
 -- :Sys -> monitor de recursos en una ventana flotante con la herramienta
 -- disponible de mayor calidad visual y `top` como respaldo.
@@ -130,7 +133,7 @@ vim.api.nvim_create_user_command("Sys", function()
   vim.keymap.set({ "n", "t" }, "q", "<cmd>q<CR>", { buffer = buf, desc = "Cerrar monitor" })
 end, { desc = "Monitor de CPU/memoria a pantalla completa" })
 
-vim.keymap.set("n", "<leader>ts", "<cmd>Sys<CR>", { desc = "System monitor (top)" })
+vim.keymap.set("n", "<leader>ts", "<cmd>Sys<CR>", { desc = t("Monitor del sistema (top)") })
 
 vim.keymap.set("n", "<leader>tt", "<cmd>Term<CR>", { desc = "Terminal en pestaña" })
 

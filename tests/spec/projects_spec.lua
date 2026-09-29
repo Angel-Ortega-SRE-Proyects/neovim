@@ -1,0 +1,187 @@
+local h = require("tests.spec_helpers")
+local projects = require("config.projects")
+local FILE = vim.fn.stdpath("state") .. "/projects.json"
+
+local function paths()
+  return vim.tbl_map(function(entry) return entry.path end, projects.list())
+end
+
+describe("registro de proyectos", function()
+  before_each(function() os.remove(FILE) end)
+  after_each(function()
+    h.reset_ui()
+    h.cleanup()
+  end)
+
+  it("registra carpetas reales normalizadas y descarta las inexistentes", function()
+    local dir = h.tempdir()
+    projects.record(dir .. "/")
+    projects.record(dir)
+    projects.record(dir .. "/no-existe")
+    assert.same({ dir }, paths())
+  end)
+
+  it("ordena fijados primero y luego por último acceso", function()
+    local a, b, c = h.tempdir(), h.tempdir(), h.tempdir()
+    h.write(FILE, vim.json.encode({
+      { path = a, last = 10 }, { path = b, last = 30 }, { path = c, last = 20, pinned = true },
+    }))
+    assert.same({ c, b, a }, paths())
+  end)
+
+  it("conserva como máximo 20 entradas sin eliminar las fijadas", function()
+    local data = { { path = "/fijo", last = 0, pinned = true } }
+    for index = 1, 21 do
+      table.insert(data, { path = "/p" .. index, last = index })
+    end
+    h.write(FILE, vim.json.encode(data))
+    projects.record(h.tempdir())
+    local list = projects.list()
+    assert.equals(20, #list)
+    assert.equals("/fijo", list[1].path)
+    assert.is_false(vim.tbl_contains(paths(), "/p1"))
+  end)
+
+  it("fija, desfija y registra al fijar una carpeta nueva", function()
+    local dir = h.tempdir()
+    assert.is_true(projects.toggle_pin(dir))
+    assert.is_true(projects.list()[1].pinned)
+    assert.is_false(projects.toggle_pin(dir))
+    assert.is_false(projects.list()[1].pinned)
+    assert.is_false(projects.set_pinned(dir .. "/no-existe", true))
+  end)
+
+  it("renombra, usa el alias en name_for y lo quita con nombre vacío", function()
+    local dir = h.tempdir()
+    projects.record(dir)
+    projects.rename(dir, "API backend")
+    assert.equals("API backend", projects.name_for(dir))
+    projects.rename(dir, "")
+    assert.equals(vim.fn.fnamemodify(dir, ":t"), projects.name_for(dir))
+    assert.equals("otra", projects.name_for("/tmp/otra"))
+  end)
+
+  it("elimina una carpeta del registro sin tocar el disco", function()
+    local dir = h.tempdir()
+    projects.record(dir)
+    projects.remove(dir)
+    assert.same({}, paths())
+    assert.equals(1, vim.fn.isdirectory(dir))
+  end)
+
+  it("tolera un archivo corrupto", function()
+    h.write(FILE, "{no es json")
+    assert.same({}, projects.list())
+  end)
+end)
+
+describe("pestañas de proyecto", function()
+  before_each(function() os.remove(FILE) end)
+  after_each(function()
+    h.reset_ui()
+    h.cleanup()
+  end)
+
+  it("open crea una pestaña con tcd y la reutiliza si ya existe", function()
+    local dir = h.tempdir()
+    assert.is_true(projects.open(dir))
+    local tab = vim.api.nvim_get_current_tabpage()
+    assert.equals(dir, vim.fn.getcwd())
+    assert.equals(dir, vim.t.project_path)
+    vim.cmd("tabfirst")
+    assert.is_true(projects.open(dir))
+    assert.equals(tab, vim.api.nvim_get_current_tabpage())
+    assert.equals(2, #vim.api.nvim_list_tabpages())
+  end)
+
+  it("open rechaza rutas que no son carpetas", function()
+    local messages = h.capture_notify(function()
+      assert.is_false(projects.open("/no/existe"))
+    end)
+    assert.matches("No es una carpeta", messages[1].msg)
+  end)
+
+  it("mark_current nombra la pestaña y refresh_tabs la numera", function()
+    local dir = h.tempdir()
+    projects.record(dir)
+    projects.rename(dir, "Demo")
+    projects.mark_current(dir)
+    assert.equals("Demo", projects.current_name())
+    assert.equals("1 · Demo", vim.t.name)
+  end)
+
+  it("no renombra la pestaña del Agent Hub", function()
+    pcall(vim.api.nvim_tabpage_del_var, 0, "project_name")
+    vim.api.nvim_tabpage_set_var(0, "agent_hub", true)
+    projects.mark_current(h.tempdir())
+    assert.is_nil(projects.current_name())
+    projects.refresh_tabs()
+    assert.equals("1 · Agent Hub", vim.t.name)
+    vim.api.nvim_tabpage_del_var(0, "agent_hub")
+  end)
+end)
+
+describe("comandos de proyectos", function()
+  require("plugins.projects")
+
+  before_each(function() os.remove(FILE) end)
+  after_each(function()
+    h.reset_ui()
+    h.cleanup()
+  end)
+
+  it("registra comandos y atajos", function()
+    for _, command in ipairs({ "Projects", "Project", "ProjectNew", "ProjectRename", "ProjectPin" }) do
+      assert.equals(2, vim.fn.exists(":" .. command), command)
+    end
+    assert.is_function(vim.fn.maparg(" p", "n", false, true).callback)
+    assert.is_function(vim.fn.maparg(" pn", "n", false, true).callback)
+  end)
+
+  it(":ProjectPin alterna el fijado de una ruta", function()
+    local dir = h.tempdir()
+    local messages = h.capture_notify(function() vim.cmd("ProjectPin " .. dir) end)
+    assert.matches("Proyecto fijado", messages[1].msg)
+    assert.is_true(projects.list()[1].pinned)
+  end)
+
+  it(":ProjectRename nombra la carpeta actual", function()
+    local dir = h.tempdir()
+    vim.cmd("tcd " .. dir)
+    vim.cmd("ProjectRename Mi proyecto")
+    assert.equals("Mi proyecto", projects.name_for(dir))
+  end)
+
+  it(":ProjectNew pide nombre, registra y abre la pestaña", function()
+    local dir = h.tempdir()
+    h.stub(vim.ui, "input", function(_, on_confirm) on_confirm("Nuevo") end, function()
+      vim.cmd("ProjectNew " .. dir)
+    end)
+    assert.equals("Nuevo", projects.name_for(dir))
+    assert.equals(dir, vim.fn.getcwd())
+  end)
+
+  it("cambiar de directorio registra la carpeta automáticamente", function()
+    local dir = h.tempdir()
+    vim.cmd("cd " .. dir)
+    assert.is_true(vim.tbl_contains(paths(), dir))
+  end)
+
+  it(":Projects abre el picker de Telescope con los proyectos", function()
+    local dir = h.tempdir()
+    projects.record(dir)
+    vim.cmd("Projects")
+    assert.is_true(h.wait_for(function() return vim.bo.filetype == "TelescopePrompt" end))
+    local results
+    h.wait_for(function()
+      for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.bo[buf].filetype == "TelescopeResults" then
+          results = table.concat(h.lines(buf), "\n")
+        end
+      end
+      return results and results:find(vim.fn.fnamemodify(dir, ":t"), 1, true)
+    end)
+    assert.matches(vim.pesc(vim.fn.fnamemodify(dir, ":t")), results)
+    require("telescope.actions").close(vim.api.nvim_get_current_buf())
+  end)
+end)

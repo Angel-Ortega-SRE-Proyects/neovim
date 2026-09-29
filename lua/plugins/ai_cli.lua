@@ -13,6 +13,7 @@
 --   <leader>ax   Mostrar/ocultar Codex
 --   <leader>ao   Mostrar/ocultar OpenCode
 --   <leader>ag   Mostrar/ocultar Gemini
+--   :Grok        Mostrar/ocultar Grok CLI
 --   <leader>aC   Mostrar/ocultar GitHub Copilot CLI (:CopilotCli -- "Copilot"
 --                a secas ya lo usa zbirenbaum/copilot.lua, la ghost-text)
 --   q  (dentro del flotante, en modo normal)   también lo oculta
@@ -55,16 +56,36 @@
 --                pantalla completa: agente a la izquierda y cambios Git a
 --                la derecha. En el panel de cambios, r lo actualiza.
 
-local AGENTS = {
+local agent_sessions = require("config.agent_sessions")
+local i18n = require("config.i18n")
+if type(agent_sessions.providers) ~= "function" or type(agent_sessions.remove) ~= "function" then
+  package.loaded["config.agent_sessions"] = nil
+  agent_sessions = require("config.agent_sessions")
+end
+-- Solo se ofrecen los agentes cuya CLI está instalada en el sistema.
+local AGENTS = vim.tbl_filter(function(agent)
+  return agent_sessions.is_installed(agent.cmd)
+end, {
   { name = "Claude Code", cmd = "claude" },
   { name = "Codex", cmd = "codex" },
   { name = "OpenCode", cmd = "opencode" },
   { name = "Gemini", cmd = "gemini" },
   { name = "Copilot", cmd = "copilot" },
-}
-local codex_sessions = require("config.codex_sessions")
+  { name = "Grok", cmd = "grok" },
+})
+local project_registry = require("config.projects")
+if type(project_registry.toggle_pin) ~= "function" then
+  package.loaded["config.projects"] = nil
+  project_registry = require("config.projects")
+end
+local SPINNER_FRAMES = { "⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏" }
+local GIT_ICON = ""
+local spinner_frame = 1
+local spinner_timer
+local hub_spinner_timer
 
-local state = {} -- name -> { buf, win }
+local state = rawget(_G, "__agent_hub_state") or {} -- name -> { buf, win }
+_G.__agent_hub_state = state
 local is_shutting_down = false
 local function valid_buf(buf)
   return type(buf) == "number" and vim.api.nvim_buf_is_valid(buf)
@@ -80,7 +101,20 @@ local start_new_instance
 local agent_status
 local STATUS_ICON
 local create_agent_hub_welcome
+local restore_hub_layout
+local render_project_menu
+local render_project_agents
+local start_project_spinner
+local stop_project_spinner
+local start_hub_spinner
+local stop_hub_spinner
+local show_hub_hover
+local close_hub_hover
+local command_text
+local project_agent_status
+local agent_hub_namespace
 local agent_hub = {}
+local saved_hub_layout = {}
 local layout_agent_hub
 local refresh_hub_changes
 local map_hub_navigation
@@ -109,6 +143,15 @@ local function publish_status()
     end
   end
   require("config.agents_status").set(visible, hidden)
+end
+
+-- Nombre vigente de la sesión dueña de `buf`: puede cambiar al renombrarla
+-- desde el Hub ("i"), así que los callbacks no deben capturar el nombre.
+local function session_name_for_buf(buf, fallback)
+  for name, s in pairs(state) do
+    if s.buf == buf then return name end
+  end
+  return fallback
 end
 
 local function next_instance_name(base)
@@ -184,7 +227,9 @@ local function close_changes_panel(s)
     if #vim.api.nvim_list_wins() > 1 then
       vim.api.nvim_win_close(s.changes_win, true)
     else
-      vim.api.nvim_win_set_buf(s.changes_win, vim.api.nvim_create_buf(true, false))
+      local placeholder = vim.api.nvim_create_buf(false, true)
+      vim.api.nvim_buf_set_name(placeholder, "Agent Changes Placeholder " .. placeholder)
+      vim.api.nvim_win_set_buf(s.changes_win, placeholder)
     end
   end
   s.changes_win = nil
@@ -194,6 +239,21 @@ local function git_output(root, args)
   local command = { "git", "-C", root or vim.fn.getcwd() }
   vim.list_extend(command, args)
   return vim.fn.systemlist(command)
+end
+
+local function is_git_repository(root)
+  if type(root) ~= "string" or root == "" then return false end
+  git_output(root, { "rev-parse", "--show-toplevel" })
+  return vim.v.shell_error == 0
+end
+
+local function normalize_project_path(path)
+  if type(path) ~= "string" then return "" end
+  return vim.fn.fnamemodify(path, ":p"):gsub("/$", "")
+end
+
+local function same_project_path(left, right)
+  return normalize_project_path(left) == normalize_project_path(right)
 end
 
 -- Los objetos internos de Git nunca son archivos editables. Si una búsqueda
@@ -230,7 +290,7 @@ local function changes_tree(files, collapsed_directories, scope)
     node.path = path
   end
 
-  local lines = { "", " ARCHIVOS MODIFICADOS" }
+  local lines = { "", "    ARCHIVOS MODIFICADOS" }
   local file_lines, folder_lines = {}, {}
   local function append(node, prefix, parent_path)
     local names = vim.tbl_keys(node)
@@ -245,6 +305,7 @@ local function changes_tree(files, collapsed_directories, scope)
         else
           local directory = parent_path == "" and name or parent_path .. "/" .. name
           local collapsed = collapsed_directories[scope .. "::" .. directory]
+          if collapsed == nil then collapsed = true end
           table.insert(lines, string.format(" %s%s %s", prefix, collapsed and "" or "", name))
           folder_lines[#lines] = directory
           if not collapsed then append(child, prefix .. "  ", directory) end
@@ -252,7 +313,9 @@ local function changes_tree(files, collapsed_directories, scope)
       end
     end
   end
-  append(root, "", "")
+  -- Sangría base para que el contenido quede visualmente dentro de
+  -- "ARCHIVOS MODIFICADOS" y del repositorio activo.
+  append(root, "    ", "")
   return lines, file_lines, folder_lines
 end
 
@@ -273,32 +336,53 @@ end
 
 local function changes_panel_lines(root)
   local roots = agent_hub.git_roots or { root or agent_hub.git_root or vim.fn.getcwd() }
+  roots = vim.tbl_filter(is_git_repository, roots)
+  if agent_hub.selected_git_roots then
+    roots = vim.tbl_filter(function(repo_root)
+      return agent_hub.selected_git_roots[repo_root] == true
+    end, roots)
+  end
   local active_root = agent_hub.git_root or roots[1]
   local lines = {
-    " GIT HUB  ·  CAMBIOS",
+    string.format(" GIT HUB  ·  CAMBIOS  ·  %d repositorio(s)", #roots),
     "",
     "  Repo activo: " .. vim.fn.fnamemodify(active_root, ":~"),
-    "  g repositorios   r actualizar   c commit   Ctrl-P buscar",
-    "",
   }
   local file_lines = {}
   local folder_lines = {}
-  local files = git_output(active_root, { "status", "--short" })
-  files = vim.tbl_filter(function(file) return not is_internal_change(file) end, files)
-  if #files == 0 then
-    table.insert(lines, "  Sin archivos modificados")
-  else
-    local tree_lines, tree_file_lines, tree_folder_lines = changes_tree(files, agent_hub.collapsed_directories or {}, active_root)
-    local tree_offset = #lines
-    vim.list_extend(lines, tree_lines)
-    for line, path in pairs(tree_file_lines) do
-      file_lines[tree_offset + line] = { root = active_root, path = path }
-    end
-    for line, path in pairs(tree_folder_lines) do
-      folder_lines[tree_offset + line] = { root = active_root, path = path }
-    end
+  local collapsed = agent_hub.collapsed_directories or {}
+
+  for _, repo_root in ipairs(roots) do
+    local project_name = project_registry.name_for(repo_root)
+    local project_key = repo_root .. "::__project__"
+    local project_collapsed = collapsed[project_key]
+    if project_collapsed == nil then project_collapsed = true end
     table.insert(lines, "")
-    table.insert(lines, string.format(" %d archivo(s) modificado(s)", #files))
+    table.insert(lines, "  " .. (project_collapsed and "▸" or "▾") .. " " .. GIT_ICON .. "  " .. project_name)
+    folder_lines[#lines] = { root = repo_root, path = "__project__" }
+
+    local files = git_output(repo_root, { "status", "--short" })
+    if vim.v.shell_error ~= 0 then
+      table.insert(lines, "    La carpeta no es un repositorio Git")
+    else
+      files = vim.tbl_filter(function(file) return not is_internal_change(file) end, files)
+      if #files == 0 then
+        table.insert(lines, "    Sin archivos modificados")
+      elseif project_collapsed then
+        table.insert(lines, string.format("      %d archivo(s) modificado(s) · plegado", #files))
+      else
+        local tree_lines, tree_file_lines, tree_folder_lines = changes_tree(files, collapsed, repo_root)
+        local tree_offset = #lines
+        vim.list_extend(lines, tree_lines)
+        for line, path in pairs(tree_file_lines) do
+          file_lines[tree_offset + line] = { root = repo_root, path = path }
+        end
+        for line, path in pairs(tree_folder_lines) do
+          folder_lines[tree_offset + line] = { root = repo_root, path = path }
+        end
+        table.insert(lines, string.format("      %d archivo(s) modificado(s)", #files))
+      end
+    end
   end
   return lines, file_lines, folder_lines
 end
@@ -306,11 +390,31 @@ end
 local function refresh_changes_panel(buf, root)
   if type(buf) == "number" and vim.api.nvim_buf_is_valid(buf) then
     local lines, file_lines, folder_lines = changes_panel_lines(root)
+    local display_lines = i18n.translate_lines(lines)
     vim.bo[buf].modifiable = true
-    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    vim.api.nvim_buf_set_lines(buf, 0, -1, false, display_lines)
     vim.bo[buf].modifiable = false
     vim.b[buf].agent_hub_changed_files = file_lines
     vim.b[buf].agent_hub_change_folders = folder_lines
+    vim.api.nvim_buf_clear_namespace(buf, agent_hub_namespace, 0, -1)
+    for line = 1, #lines do
+      local row = line - 1
+      if folder_lines[line] then
+        local group = folder_lines[line].path == "__project__"
+            and "AgentChangesRepo" or "AgentChangesFolder"
+        vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, group, row, 0, -1)
+      elseif file_lines[line] then
+        local text = lines[line]
+        local status = text:sub(-2)
+        local group = status == "??" and "AgentChangesAdded"
+            or status == " D" and "AgentChangesDeleted"
+            or status == " M" and "AgentChangesModified"
+            or "AgentChangesFile"
+        vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, group, row, 0, -1)
+      elseif lines[line]:match("archivo%(s%) modificado") then
+        vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentChangesSummary", row, 0, -1)
+      end
+    end
   end
 end
 
@@ -321,8 +425,13 @@ local function toggle_changes_folder(buf)
   local entry = folders[vim.fn.line(".")]
   if not entry then return false end
   agent_hub.collapsed_directories = agent_hub.collapsed_directories or {}
-  local key = entry.root .. "::" .. entry.path
-  agent_hub.collapsed_directories[key] = not agent_hub.collapsed_directories[key]
+  local root = type(entry) == "table" and entry.root or agent_hub.git_root
+  local path = type(entry) == "table" and entry.path or entry
+  if type(root) ~= "string" or type(path) ~= "string" then return false end
+  local key = root .. "::" .. path
+  local collapsed = agent_hub.collapsed_directories[key]
+  if collapsed == nil then collapsed = true end
+  agent_hub.collapsed_directories[key] = not collapsed
   refresh_changes_panel(buf)
   return true
 end
@@ -342,6 +451,46 @@ local function create_changes_panel()
       refresh_changes_panel(buf, agent_hub.git_root or vim.fn.getcwd())
     end
   end, { buffer = buf, desc = "Actualizar cambios Git" })
+  local hover_events = { "CursorMoved" }
+  if vim.fn.exists("##MouseMoved") == 1 then
+    table.insert(hover_events, "MouseMoved")
+  end
+  vim.opt.mousemoveevent = true
+  vim.api.nvim_create_autocmd(hover_events, {
+    buffer = buf,
+    callback = function()
+      local buffer_vars = vim.b[buf]
+      local folders = type(buffer_vars) == "table" and buffer_vars.agent_hub_change_folders
+      local entry = type(folders) == "table" and folders[vim.fn.line(".")]
+      if type(entry) == "table" and entry.path == "__project__" then
+        show_hub_hover({
+          action = "project_change",
+          display_name = project_registry.name_for(entry.root),
+          cwd = entry.root,
+        }, vim.api.nvim_get_current_win())
+      else
+        close_hub_hover()
+      end
+    end,
+  })
+  vim.api.nvim_create_autocmd("WinLeave", {
+    buffer = buf,
+    callback = close_hub_hover,
+  })
+  vim.api.nvim_create_autocmd("WinResized", {
+    buffer = buf,
+    callback = function()
+      local entry = agent_hub.hover_entry
+      local target_win = agent_hub.hover_target_win
+      if not entry or not target_win or not vim.api.nvim_win_is_valid(target_win) then return end
+      close_hub_hover()
+      vim.schedule(function()
+        if vim.api.nvim_win_is_valid(target_win) then
+          show_hub_hover(entry, target_win)
+        end
+      end)
+    end,
+  })
   return buf
 end
 
@@ -395,7 +544,7 @@ end
 
 -- Espacio de trabajo persistente para operar agentes sin tener que recordar
 -- atajos. Mantiene sesiones, terminal y cambios Git visibles a la vez.
-local agent_hub_namespace = vim.api.nvim_create_namespace("agent-hub")
+agent_hub_namespace = vim.api.nvim_create_namespace("agent-hub")
 
 local function setup_agent_hub_highlights()
   local colors = require("config.theme").colors
@@ -406,9 +555,17 @@ local function setup_agent_hub_highlights()
   vim.api.nvim_set_hl(0, "AgentHubRunning", { fg = colors.green })
   vim.api.nvim_set_hl(0, "AgentHubStopped", { fg = colors.green_dim })
   vim.api.nvim_set_hl(0, "AgentHubAction", { fg = colors.tan })
+  vim.api.nvim_set_hl(0, "AgentChangesRepo", { fg = colors.cyan, bold = true })
+  vim.api.nvim_set_hl(0, "AgentChangesFolder", { fg = colors.green, bold = true })
+  vim.api.nvim_set_hl(0, "AgentChangesFile", { fg = colors.fg })
+  vim.api.nvim_set_hl(0, "AgentChangesModified", { fg = colors.cyan })
+  vim.api.nvim_set_hl(0, "AgentChangesAdded", { fg = colors.diff_add_fg })
+  vim.api.nvim_set_hl(0, "AgentChangesDeleted", { fg = colors.diff_delete_fg })
+  vim.api.nvim_set_hl(0, "AgentChangesSummary", { fg = colors.green_dim, italic = true })
 end
 
 local function style_agent_hub_window(win, title, is_sidebar)
+  title = i18n.translate_line(title)
   local options = vim.wo[win]
   options.number = false
   options.relativenumber = false
@@ -434,52 +591,200 @@ local function choose_session_directory()
   return directory
 end
 
-local function hub_entries()
+local function registered_project_entries(active_projects, current_root)
   local entries = {}
-  for _, agent in ipairs(AGENTS) do
-    table.insert(entries, { name = agent.name, cmd = agent.cmd, action = "agent" })
+  local seen = {}
+
+  local function add(raw_path, display_name, opts)
+    if type(raw_path) ~= "string" or raw_path == "" then return end
+    local path = normalize_project_path(raw_path)
+    if seen[path] then return end
+    seen[path] = true
+    opts = opts or {}
+    local is_active = not active_projects
+        or active_projects[path]
+        or same_project_path(path, current_root)
+    table.insert(entries, {
+      name = "Registered project: " .. path,
+      display_name = display_name or vim.fn.fnamemodify(path, ":t"),
+      cwd = path,
+      description = opts.description,
+      last = opts.last,
+      pinned = opts.pinned == true,
+      active = is_active,
+      action = "project",
+    })
   end
-  for name, s in pairs(state) do
-    if not s.external and not vim.tbl_contains(vim.tbl_map(function(agent) return agent.name end, AGENTS), name) then
-      table.insert(entries, { name = name, cmd = s.cmd, action = "agent" })
+
+  for _, project in ipairs(project_registry.list()) do
+    add(project.path, project.name, project)
+  end
+
+  -- Proyectos con sesiones de agentes que aún no se abrieron desde el picker
+  -- (por lo que no están en projects.json) también deben listarse acá.
+  for _, group in ipairs(agent_sessions.grouped()) do
+    add(group.path, group.name, { last = group.updated_at })
+  end
+
+  return entries
+end
+
+local function registered_project_roots()
+  local roots = {}
+  for _, entry in ipairs(registered_project_entries()) do
+    table.insert(roots, entry.cwd)
+  end
+  return roots
+end
+
+local function external_session_status(session)
+  if state[session.name] then return agent_status(session.name) end
+  return agent_sessions.status(session)
+end
+
+local function active_session_projects()
+  local active = {}
+  for _, group in ipairs(agent_sessions.grouped()) do
+    for _, session in ipairs(group.sessions or {}) do
+      if external_session_status(session) == "ejecutando" then
+        active[normalize_project_path(group.path)] = true
+        break
+      end
     end
   end
+  for name, session in pairs(state) do
+    if session.cwd and agent_status(name) ~= "detenido" then
+      active[normalize_project_path(session.cwd)] = true
+    end
+  end
+  return active
+end
+
+local function active_agent_entries()
+  local entries = {}
+  local known = {}
+
+  for name, session in pairs(state) do
+    if agent_status(name) ~= "detenido" then
+      table.insert(entries, {
+        name = name,
+        cmd = session.cmd,
+        cwd = session.cwd,
+        action = "agent",
+        external = false,
+      })
+      known[name] = true
+    end
+  end
+
+  for _, session in ipairs(agent_sessions.list()) do
+    if external_session_status(session) ~= "detenido" and not known[session.name] then
+      table.insert(entries, session)
+      known[session.name] = true
+    end
+  end
+
   table.sort(entries, function(left, right) return left.name < right.name end)
-  return entries, codex_sessions.grouped()
+  return entries
 end
 
-local function copilot_inline_status()
-  local ok, copilot_status = pcall(require, "config.copilot_status")
-  if not ok then return "sin iniciar" end
-  local labels = {
-    Normal = "listo",
-    InProgress = "pensando",
-    Warning = "revisar",
-  }
-  return labels[copilot_status.status] or "sin iniciar"
-end
-
-local function close_hub_hover()
+close_hub_hover = function()
   if agent_hub.hover_win and vim.api.nvim_win_is_valid(agent_hub.hover_win) then
     vim.api.nvim_win_close(agent_hub.hover_win, true)
   end
   agent_hub.hover_win = nil
   agent_hub.hover_buf = nil
+  agent_hub.hover_key = nil
+  agent_hub.hover_line = nil
+  agent_hub.hover_entry = nil
+  agent_hub.hover_target_win = nil
+end
+
+local function project_change_summary(path)
+  if vim.fn.isdirectory(path) ~= 1 then return "carpeta no disponible" end
+  local files = git_output(path, { "status", "--short" })
+  if vim.v.shell_error ~= 0 then return "no es un repositorio Git" end
+  files = vim.tbl_filter(function(file) return not is_internal_change(file) end, files)
+  return #files == 0 and "sin cambios" or (#files .. " cambio(s)")
+end
+
+local function project_branch(path)
+  local branch = git_output(path, { "branch", "--show-current" })[1]
+  if branch and vim.trim(branch) ~= "" then return vim.trim(branch) end
+  local head = git_output(path, { "rev-parse", "--short", "HEAD" })[1]
+  return head and vim.trim(head) ~= "" and "detached@" .. vim.trim(head) or "sin rama"
+end
+
+local function project_last_seen(timestamp)
+  if type(timestamp) ~= "number" or timestamp <= 0 then return "sin registro" end
+  return os.date("%Y-%m-%d %H:%M", timestamp)
 end
 
 local function hub_hover_lines(entry)
   if entry.action == "project" then
-    return {
-      "Proyecto Codex",
+    local lines = {
+      "Proyecto registrado",
       "Nombre: " .. entry.display_name,
       "Ruta: " .. entry.cwd,
-      "Enter / p  abrir proyecto",
+      "Rama: " .. project_branch(entry.cwd),
+      "Último acceso: " .. project_last_seen(entry.last),
+      "Cambios: " .. project_change_summary(entry.cwd),
+      "Fijo: " .. (entry.pinned and "sí" or "no"),
+      "Estado: " .. (entry.active and "activo" or "inactivo"),
+      "Enter  abrir proyecto",
+      "p  abrir proyecto",
+    }
+    if entry.description and entry.description ~= "" then
+      table.insert(lines, 4, "Descripción: " .. entry.description)
+    end
+    return lines
+  end
+  if entry.action == "project_open" then
+    return {
+      "Abrir proyecto",
+      "Nombre: " .. entry.display_name,
+      "Enter  abrir proyecto",
+    }
+  end
+  if entry.action == "project_agents" then
+    return {
+      "Agentes del proyecto",
+      "Nombre: " .. entry.display_name,
+      "Enter  listar agentes y estados",
+    }
+  end
+  if entry.action == "project_change" then
+    return {
+      "Repositorio",
+      "Proyecto: " .. entry.display_name,
+      "Ruta: " .. entry.cwd,
+      "Rama: " .. project_branch(entry.cwd),
+      "Cambios: " .. project_change_summary(entry.cwd),
+      "Repo activo: " .. vim.fn.fnamemodify(entry.cwd, ":~"),
+      "Atajos:",
+      "g  repositorios   r  actualizar",
+      "c  commit         Ctrl-P  buscar",
+      "Enter  plegar/desplegar",
+    }
+  end
+  if entry.action == "noop" then
+    return {}
+  end
+  if entry.action == "agent_command" then
+    local agent = entry.agent or entry
+    local status = project_agent_status(agent)
+    return {
+      "Comando del agente",
+      "Agente: " .. agent.name,
+      "Comando: " .. command_text(agent.cmd),
+      "Proyecto: " .. tostring(agent.cwd or "sin ruta"),
+      "Estado: " .. status,
     }
   end
   if entry.external then
-    local status = state[entry.name] and agent_status(entry.name) or "disponible"
+    local status = external_session_status(entry)
     return {
-      "Sesión Codex",
+      "Sesión " .. (entry.kind or "externa"),
       "Título: " .. entry.name,
       "Proyecto: " .. entry.cwd,
       "ID: " .. entry.session_id,
@@ -494,34 +799,68 @@ local function hub_hover_lines(entry)
   }
 end
 
-local function show_hub_hover(entry)
-  close_hub_hover()
-  if not entry or entry.action == "new" or not agent_hub.sidebar_win
-      or not vim.api.nvim_win_is_valid(agent_hub.sidebar_win) then
+local function hub_hover_key(entry)
+  return table.concat({
+    tostring(entry.action or ""),
+    tostring(entry.name or ""),
+    tostring(entry.cwd or ""),
+    tostring(entry.display_name or ""),
+    tostring(entry.session_id or ""),
+  }, "\0")
+end
+
+show_hub_hover = function(entry, target_win)
+  target_win = target_win or agent_hub.sidebar_win
+  if not entry or entry.action == "new" or not target_win
+      or not vim.api.nvim_win_is_valid(target_win) then
+    close_hub_hover()
     return
   end
 
+  local line = vim.fn.line(".")
+  local key = hub_hover_key(entry)
+  if agent_hub.hover_key == key and agent_hub.hover_line == line
+      and agent_hub.hover_win and vim.api.nvim_win_is_valid(agent_hub.hover_win) then
+    return
+  end
   local lines = hub_hover_lines(entry)
+  if #lines == 0 then
+    close_hub_hover()
+    return
+  end
+  close_hub_hover()
   local width = 44
   for _, line in ipairs(lines) do
     width = math.max(width, vim.fn.strdisplaywidth(line) + 2)
   end
   width = math.min(width, 86)
   local height = #lines
-  local sidebar_height = vim.api.nvim_win_get_height(agent_hub.sidebar_win)
-  local row = math.min(vim.fn.line(".") - 1, math.max(0, sidebar_height - height))
+  local target_width = vim.api.nvim_win_get_width(target_win)
+  local target_row, target_col = unpack(vim.api.nvim_win_get_position(target_win))
+  local hover_gap = 3
+  local right_space = vim.o.columns - (target_col + target_width)
+  local col
+  if right_space >= width + hover_gap then
+    col = target_col + target_width + hover_gap
+  elseif target_col >= width + hover_gap then
+    col = target_col - width - hover_gap
+  else
+    col = target_col
+  end
+  local row = math.min(target_row + vim.fn.line(".") - 1, vim.o.lines - height - 2)
+  row = math.max(0, row)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].buftype = "nofile"
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].swapfile = false
+  vim.api.nvim_buf_set_name(buf, "Agent Hub Hover " .. buf)
   vim.bo[buf].modifiable = true
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, i18n.translate_lines(lines))
   vim.bo[buf].modifiable = false
   local win = vim.api.nvim_open_win(buf, false, {
-    relative = "win",
-    win = agent_hub.sidebar_win,
+    relative = "editor",
     row = row,
-    col = vim.api.nvim_win_get_width(agent_hub.sidebar_win) + 1,
+    col = col,
     width = width,
     height = height,
     style = "minimal",
@@ -534,6 +873,10 @@ local function show_hub_hover(entry)
   vim.wo[win].winhl = "Normal:NormalFloat,FloatBorder:FloatBorder"
   agent_hub.hover_buf = buf
   agent_hub.hover_win = win
+  agent_hub.hover_key = key
+  agent_hub.hover_line = line
+  agent_hub.hover_entry = entry
+  agent_hub.hover_target_win = target_win
 end
 
 local function authenticate_copilot()
@@ -543,51 +886,57 @@ local function authenticate_copilot()
   end
 end
 
+local function save_hub_layout()
+  if agent_hub.maximized then return end
+  local sidebar = agent_hub.sidebar_win
+  local changes = agent_hub.changes_win
+  local command = agent_hub.command_win
+  if not (sidebar and changes and command) then return end
+  if not (vim.api.nvim_win_is_valid(sidebar)
+      and vim.api.nvim_win_is_valid(changes)
+      and vim.api.nvim_win_is_valid(command)) then
+    return
+  end
+  saved_hub_layout = {
+    sidebar_width = vim.api.nvim_win_get_width(sidebar),
+    changes_width = vim.api.nvim_win_get_width(changes),
+    command_height = vim.api.nvim_win_get_height(command),
+  }
+end
+
 local function render_agent_hub()
   local buf = agent_hub.buf
   if not valid_buf(buf) then
     return
   end
+  stop_project_spinner()
+  agent_hub.project_view = nil
+  agent_hub.project_group = nil
+  if agent_hub.sidebar_win and vim.api.nvim_win_is_valid(agent_hub.sidebar_win) then
+    style_agent_hub_window(agent_hub.sidebar_win, "AGENT HUB  ·  sesiones", true)
+  end
+  if agent_hub.layout_initialized then save_hub_layout() end
   if layout_agent_hub then layout_agent_hub() end
 
   local lines = {
     "  AGENT HUB",
-    "  Sesiones disponibles",
     "",
-    "  SESIONES",
   }
   agent_hub.line_entries = {}
-  local entries, project_groups = hub_entries()
-  for _, entry in ipairs(entries) do
-    local status = agent_status(entry.name)
-    local selected = entry.name == agent_hub.active and ">" or " "
-    local detail = entry.name == "Copilot"
-        and (status .. " · inline " .. copilot_inline_status())
-      or status
-    table.insert(lines, string.format(" %s %s %-18s %s", selected, STATUS_ICON[status], entry.name, detail))
-    agent_hub.line_entries[#lines] = entry
-  end
-
-  if #project_groups > 0 then
+  local active_projects = active_session_projects()
+  local project_entries = registered_project_entries(active_projects, agent_hub.git_root)
+  local project_section_line
+  if #project_entries > 0 then
     table.insert(lines, "")
-    table.insert(lines, "  CODEX POR PROYECTO")
-    for _, group in ipairs(project_groups) do
-      local project_entry = {
-        name = "Codex project: " .. group.path,
-        display_name = group.name,
-        cwd = group.path,
-        action = "project",
-      }
-      table.insert(lines, string.format("  ▾ %-18s %s", group.name, vim.fn.fnamemodify(group.path, ":~")))
-      agent_hub.line_entries[#lines] = project_entry
-      for _, session in ipairs(group.sessions) do
-        local status = state[session.name] and agent_status(session.name) or "disponible"
-        local selected = session.name == agent_hub.active and ">" or " "
-        table.insert(lines, string.format("    %s %s %s", selected, STATUS_ICON[status], session.name))
-        agent_hub.line_entries[#lines] = session
-      end
+    project_section_line = #lines + 1
+    table.insert(lines, "  PROYECTOS REGISTRADOS")
+    for _, entry in ipairs(project_entries) do
+      local marker = "○"
+      table.insert(lines, string.format("  %s  %s", marker, entry.display_name))
+      agent_hub.line_entries[#lines] = entry
     end
   end
+
   table.insert(lines, "")
   table.insert(lines, "  NUEVA INSTANCIA")
   for _, agent in ipairs(AGENTS) do
@@ -595,30 +944,381 @@ local function render_agent_hub()
     agent_hub.line_entries[#lines] = { name = agent.name, cmd = agent.cmd, action = "new" }
   end
 
+  lines = i18n.translate_lines(lines)
   vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].modifiable = false
   vim.api.nvim_buf_clear_namespace(buf, agent_hub_namespace, 0, -1)
   vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubTitle", 0, 0, -1)
   vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubHint", 1, 0, -1)
-  vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubSection", 3, 0, -1)
+  if project_section_line then
+    vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubSection", project_section_line - 1, 0, -1)
+  end
 
   for line, entry in pairs(agent_hub.line_entries) do
     local row = line - 1
     if entry.action == "new" then
       vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubAction", row, 0, -1)
     elseif entry.action == "project" then
-      vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubSection", row, 0, -1)
+      local group = same_project_path(entry.cwd, agent_hub.git_root)
+          and "AgentHubActive" or "AgentHubRunning"
+      vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, group, row, 0, -1)
     elseif entry.name == agent_hub.active then
       vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubActive", row, 0, -1)
-    elseif agent_status(entry.name) == "detenido" or (entry.external and not state[entry.name]) then
+    elseif (entry.external and external_session_status(entry) == "detenido")
+        or (not entry.external and agent_status(entry.name) == "detenido") then
       vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubStopped", row, 0, -1)
     else
       vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubRunning", row, 0, -1)
     end
   end
-  local section_row = #lines - #AGENTS - 1
-  vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubSection", section_row, 0, -1)
+  if next(active_projects) then
+    start_hub_spinner()
+  else
+    stop_hub_spinner()
+  end
+end
+
+command_text = function(cmd)
+  if type(cmd) == "table" then
+    return table.concat(cmd, " ")
+  end
+  return tostring(cmd or "")
+end
+
+local function compact_text(text, width)
+  text = tostring(text or "")
+  if vim.fn.strdisplaywidth(text) <= width then return text end
+  if width <= 3 then return vim.fn.strcharpart(text, 0, width) end
+  return vim.fn.strcharpart(text, 0, width - 3) .. "..."
+end
+
+local function project_status_icon(status)
+  if status == "ejecutando" then
+    return SPINNER_FRAMES[spinner_frame]
+  end
+  if status == "activo" or status == "visible" or status == "oculto" then
+    return "●"
+  end
+  return STATUS_ICON[status] or "◇"
+end
+
+local function project_status_label(status)
+  if status == "activo" then
+    return "listo"
+  end
+  if status == "visible" or status == "oculto" then
+    return "activo"
+  end
+  return status
+end
+
+local function project_agents(group)
+  local agents = {}
+  local known = {}
+
+  local function add(entry)
+    if not entry or not entry.name or known[entry.name] then return end
+    known[entry.name] = true
+    table.insert(agents, entry)
+  end
+
+  for _, session in ipairs(group.sessions or {}) do
+    add(session)
+  end
+
+  for name, session in pairs(state) do
+    if session.cwd and same_project_path(session.cwd, group.path) then
+      add({
+        name = name,
+        cmd = session.cmd,
+        cwd = session.cwd,
+        action = "agent",
+        external = false,
+      })
+    end
+  end
+
+  table.sort(agents, function(left, right) return left.name < right.name end)
+  return agents
+end
+
+project_agent_status = function(entry)
+  if entry.external then return external_session_status(entry) end
+  return agent_status(entry.name)
+end
+
+local function collect_project_sessions(group)
+  if group.sessions_loaded then return end
+  local sessions = group.sessions or {}
+  local known = {}
+  for _, session in ipairs(sessions) do
+    known[session.session_id or session.name] = true
+  end
+  for _, candidate in ipairs(agent_sessions.grouped()) do
+    if same_project_path(candidate.path, group.path) then
+      for _, session in ipairs(candidate.sessions) do
+        local key = session.session_id or session.name
+        if not known[key] then
+          table.insert(sessions, session)
+          known[key] = true
+        end
+      end
+    end
+  end
+  group.sessions = sessions
+  group.sessions_loaded = true
+end
+
+local function write_hub_sidebar(lines)
+  local buf = agent_hub.buf
+  if not valid_buf(buf) then return false end
+  lines = i18n.translate_lines(lines)
+  vim.bo[buf].modifiable = true
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+  vim.api.nvim_buf_clear_namespace(buf, agent_hub_namespace, 0, -1)
+  vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubTitle", 0, 0, -1)
+  vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubHint", 1, 0, -1)
+  if agent_hub.sidebar_win and vim.api.nvim_win_is_valid(agent_hub.sidebar_win) then
+    local row = math.min(vim.fn.line("."), #lines)
+    vim.api.nvim_win_set_cursor(agent_hub.sidebar_win, { math.max(1, row), 0 })
+  end
+  return true
+end
+
+local function project_active_agents(group)
+  local active = {}
+  for _, entry in ipairs(project_agents(group)) do
+    local status = project_agent_status(entry)
+    if status ~= "detenido" then
+      table.insert(active, entry)
+    end
+  end
+  return active
+end
+
+local function project_has_executing_agent(group)
+  for _, entry in ipairs(project_agents(group)) do
+    if project_agent_status(entry) == "ejecutando" then return true end
+  end
+  return false
+end
+
+render_project_menu = function(entry, preserve_cursor)
+  if not valid_buf(agent_hub.buf) then
+    stop_project_spinner()
+    stop_hub_spinner()
+    return
+  end
+  stop_hub_spinner()
+  local group = entry.group or (entry.path and entry.sessions and entry) or {
+    path = entry.cwd,
+    name = entry.display_name,
+    sessions = {},
+  }
+  group.path = group.path or entry.cwd
+  group.name = group.name or entry.display_name or vim.fn.fnamemodify(group.path or "", ":t")
+  group.sessions = group.sessions or {}
+  collect_project_sessions(group)
+  agent_hub.project_view = "menu"
+  agent_hub.project_group = group
+  agent_hub.line_entries = {}
+  agent_hub.selection = nil
+  if agent_hub.sidebar_win and vim.api.nvim_win_is_valid(agent_hub.sidebar_win) then
+    style_agent_hub_window(agent_hub.sidebar_win, "PROYECTO  ·  " .. group.name, true)
+  end
+
+  local lines = {
+    "  PROYECTO",
+    "  " .. group.name,
+    "",
+    "  ACTIVOS",
+  }
+  local active_entries = project_active_agents(group)
+  local width = agent_hub.sidebar_win and vim.api.nvim_win_is_valid(agent_hub.sidebar_win)
+      and vim.api.nvim_win_get_width(agent_hub.sidebar_win) or 30
+  if #active_entries == 0 then
+    table.insert(lines, "  Sin agentes activos")
+  else
+    for index, active in ipairs(active_entries) do
+      if index > 5 then break end
+      local status = project_agent_status(active)
+      table.insert(lines, string.format("  %s %-18s %s", project_status_icon(status),
+        compact_text(active.name, math.max(10, width - 14)), project_status_label(status)))
+      agent_hub.line_entries[#lines] = active
+    end
+  end
+  table.insert(lines, "")
+  local actions_line = #lines + 1
+  table.insert(lines,
+    "  ACCIONES")
+  local open_entry = {
+    name = "Abrir proyecto: " .. group.name,
+    display_name = group.name,
+    cwd = group.path,
+    action = "project_open",
+  }
+  local agents_entry = {
+    name = "Agentes del proyecto: " .. group.name,
+    display_name = group.name,
+    cwd = group.path,
+    group = group,
+    action = "project_agents",
+  }
+  local open_line = #lines + 1
+  table.insert(lines, "  ↗ Abrir proyecto")
+  local agents_line = #lines + 1
+  table.insert(lines, "  ☷ Ver agentes del proyecto")
+  table.insert(lines, "")
+  table.insert(lines, "  q  volver a proyectos")
+  agent_hub.line_entries[open_line] = open_entry
+  agent_hub.line_entries[agents_line] = agents_entry
+  if not write_hub_sidebar(lines) then
+    stop_project_spinner()
+    return
+  end
+  vim.api.nvim_buf_add_highlight(agent_hub.buf, agent_hub_namespace, "AgentHubSection", actions_line - 1, 0, -1)
+  for line, action in pairs(agent_hub.line_entries) do
+    if action.action == "agent" then
+      vim.api.nvim_buf_add_highlight(agent_hub.buf, agent_hub_namespace, "AgentHubRunning", line - 1, 0, -1)
+    elseif action.action ~= "noop" then
+      vim.api.nvim_buf_add_highlight(agent_hub.buf, agent_hub_namespace, "AgentHubAction", line - 1, 0, -1)
+    end
+  end
+  if agent_hub.sidebar_win and vim.api.nvim_win_is_valid(agent_hub.sidebar_win) then
+    local cursor_line = preserve_cursor and vim.fn.line(".") or open_line
+    vim.api.nvim_win_set_cursor(agent_hub.sidebar_win, { math.min(cursor_line, #lines), 0 })
+  end
+  if project_has_executing_agent(group) then
+    start_project_spinner()
+  else
+    stop_project_spinner()
+  end
+end
+
+render_project_agents = function(group)
+  if not valid_buf(agent_hub.buf) then
+    stop_project_spinner()
+    stop_hub_spinner()
+    return
+  end
+  stop_hub_spinner()
+  agent_hub.project_view = "agents"
+  agent_hub.project_group = group
+  agent_hub.line_entries = {}
+  agent_hub.selection = nil
+  if agent_hub.sidebar_win and vim.api.nvim_win_is_valid(agent_hub.sidebar_win) then
+    style_agent_hub_window(agent_hub.sidebar_win, "AGENTES  ·  " .. group.name, true)
+  end
+
+  local lines = {
+    "  AGENTES DEL PROYECTO",
+    "  " .. group.name,
+    "  q  volver al proyecto",
+    "",
+  }
+  local width = agent_hub.sidebar_win and vim.api.nvim_win_is_valid(agent_hub.sidebar_win)
+      and vim.api.nvim_win_get_width(agent_hub.sidebar_win) or 30
+  local sessions = project_agents(group)
+  if #sessions == 0 then
+    table.insert(lines, "  Sin agentes registrados en este proyecto")
+  end
+  local name_width = math.max(10, math.min(18, width - 20))
+  local command_width = math.max(10, width - 14)
+  local active_sessions = vim.tbl_filter(function(entry)
+    return project_agent_status(entry) ~= "detenido"
+  end, sessions)
+  local stopped_sessions = vim.tbl_filter(function(entry)
+    return project_agent_status(entry) == "detenido"
+  end, sessions)
+  local section_lines = {}
+
+  local function append_session(entry)
+    local status = project_agent_status(entry)
+    table.insert(lines, string.format("  %s %-" .. name_width .. "s %s", project_status_icon(status),
+      compact_text(entry.name, name_width), project_status_label(status)))
+    agent_hub.line_entries[#lines] = entry
+    table.insert(lines, "      comando: " .. compact_text(command_text(entry.cmd), command_width))
+    agent_hub.line_entries[#lines] = { action = "agent_command", agent = entry }
+  end
+
+  if #active_sessions > 0 then
+    table.insert(lines, "  PERFILES ACTIVOS")
+    table.insert(section_lines, #lines)
+    for _, entry in ipairs(active_sessions) do append_session(entry) end
+  end
+  if #stopped_sessions > 0 then
+    table.insert(lines, "  AGENTES REGISTRADOS")
+    table.insert(section_lines, #lines)
+    for _, entry in ipairs(stopped_sessions) do append_session(entry) end
+  end
+  if not write_hub_sidebar(lines) then
+    stop_project_spinner()
+    return
+  end
+  for _, line in ipairs(section_lines) do
+    vim.api.nvim_buf_add_highlight(agent_hub.buf, agent_hub_namespace, "AgentHubSection", line - 1, 0, -1)
+  end
+  for line, entry in pairs(agent_hub.line_entries) do
+    if entry.action == "agent" then
+      local status = project_agent_status(entry)
+      local group_name = status == "detenido" and "AgentHubStopped" or "AgentHubRunning"
+      vim.api.nvim_buf_add_highlight(agent_hub.buf, agent_hub_namespace, group_name, line - 1, 0, -1)
+    else
+      vim.api.nvim_buf_add_highlight(agent_hub.buf, agent_hub_namespace, "AgentHubHint", line - 1, 0, -1)
+    end
+  end
+  if project_has_executing_agent(group) then
+    start_project_spinner()
+  else
+    stop_project_spinner()
+  end
+end
+
+stop_project_spinner = function()
+  if not spinner_timer then return end
+  spinner_timer:stop()
+  spinner_timer:close()
+  spinner_timer = nil
+end
+
+start_project_spinner = function()
+  if spinner_timer then return end
+  spinner_timer = vim.uv.new_timer()
+  spinner_timer:start(0, 140, vim.schedule_wrap(function()
+    if not valid_buf(agent_hub.buf) or not agent_hub.project_view or not agent_hub.project_group
+        or not agent_hub.sidebar_win or not vim.api.nvim_win_is_valid(agent_hub.sidebar_win) then
+      stop_project_spinner()
+      return
+    end
+    spinner_frame = (spinner_frame % #SPINNER_FRAMES) + 1
+    if agent_hub.project_view == "menu" then
+      render_project_menu(agent_hub.project_group, true)
+    else
+      render_project_agents(agent_hub.project_group)
+    end
+  end))
+end
+
+stop_hub_spinner = function()
+  if not hub_spinner_timer then return end
+  hub_spinner_timer:stop()
+  hub_spinner_timer:close()
+  hub_spinner_timer = nil
+end
+
+start_hub_spinner = function()
+  if hub_spinner_timer then return end
+  hub_spinner_timer = vim.uv.new_timer()
+  hub_spinner_timer:start(0, 140, vim.schedule_wrap(function()
+    if not valid_buf(agent_hub.buf) or agent_hub.project_view then
+      stop_hub_spinner()
+      return
+    end
+    spinner_frame = (spinner_frame % #SPINNER_FRAMES) + 1
+    render_agent_hub()
+  end))
 end
 
 local function activate_hub_agent(name, cmd, cwd, external)
@@ -671,6 +1371,21 @@ end
 
 local function selected_hub_entry()
   return agent_hub.line_entries and (agent_hub.line_entries[vim.fn.line(".")] or agent_hub.selection)
+end
+
+local function toggle_hub_project_pin()
+  local entry = selected_hub_entry()
+  if not entry or entry.action ~= "project" then
+    open_hub_repo_menu()
+    return
+  end
+  if vim.fn.isdirectory(entry.cwd) ~= 1 then
+    vim.notify("La carpeta del proyecto no existe", vim.log.levels.WARN)
+    return
+  end
+  local pinned = project_registry.toggle_pin(entry.cwd)
+  vim.notify((pinned and "Proyecto fijado con " .. GIT_ICON .. ": " or "Proyecto desfijado: ") .. entry.display_name)
+  render_agent_hub()
 end
 
 local function rename_hub_session()
@@ -739,6 +1454,7 @@ local function render_agent_hub_welcome(buf, width)
   for _ = 1, top_padding do
     table.insert(lines, 1, "")
   end
+  lines = i18n.translate_lines(lines)
   vim.bo[buf].modifiable = true
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].modifiable = false
@@ -756,6 +1472,7 @@ create_agent_hub_welcome = function(width)
   vim.bo[buf].buftype = "nofile"
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].swapfile = false
+  vim.api.nvim_buf_set_name(buf, "Agent Hub Welcome " .. buf)
   render_agent_hub_welcome(buf, width)
   return buf
 end
@@ -765,12 +1482,13 @@ local function create_agent_hub_command_bar()
   vim.bo[buf].buftype = "nofile"
   vim.bo[buf].bufhidden = "hide"
   vim.bo[buf].swapfile = false
+  vim.api.nvim_buf_set_name(buf, "Agent Hub Actions " .. buf)
   vim.bo[buf].modifiable = true
   local path = vim.fn.fnamemodify(vim.fn.getcwd(), ":~")
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, i18n.translate_lines({
     "  " .. path .. " · Agent Hub",
-    "  [ ↵ Abrir ] [ n Nueva ] [ u Cuota ] [ i Renombrar ] [ ! Detener ] [ d Diff ] [ g Repos ] [ c Commit ] [ a Copilot ] [ m Expandir ]",
-  })
+    "  [ j/k Proyecto ] [ ↵ Cambios ] [ p Abrir ] [ g Fijar/Repos ] [ n Nueva ] [ i Renombrar ] [ ! Detener ] [ d Diff ] [ c Commit ] [ a Copilot ] [ m Expandir ]",
+  }))
   vim.bo[buf].modifiable = false
   vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubTitle", 0, 0, -1)
   vim.api.nvim_buf_add_highlight(buf, agent_hub_namespace, "AgentHubAction", 1, 0, -1)
@@ -782,19 +1500,40 @@ refresh_hub_command_bar = function()
   if not valid_buf(buf) then return end
   local path = vim.fn.fnamemodify(agent_hub.git_root or vim.fn.getcwd(), ":~")
   vim.bo[buf].modifiable = true
-  vim.api.nvim_buf_set_lines(buf, 0, 1, false, { "  " .. path .. " · Agent Hub" })
+  vim.api.nvim_buf_set_lines(buf, 0, 1, false, i18n.translate_lines({ "  " .. path .. " · Agent Hub" }))
   vim.bo[buf].modifiable = false
+end
+
+local function current_changes_title()
+  local roots = agent_hub.git_roots or { agent_hub.git_root or vim.fn.getcwd() }
+  if agent_hub.selected_git_roots then
+    roots = vim.tbl_filter(function(root)
+      return agent_hub.selected_git_roots[root] == true
+    end, roots)
+  end
+  return i18n.translate_line(string.format("CAMBIOS  ·  %d repositorio(s)", #roots))
+end
+
+local function select_hub_project(entry)
+  if not entry or entry.action ~= "project" or entry.cwd == "" then return false end
+  agent_hub.git_root = entry.cwd
+  add_git_root(entry.cwd)
+  agent_hub.selected_project = entry
+  style_agent_hub_window(agent_hub.changes_win, current_changes_title(), false)
+  refresh_hub_command_bar()
+  refresh_hub_changes()
+  return true
 end
 
 local function resize_hub_window(direction)
   if direction == "left" then
-    vim.cmd("vertical resize +5")
-  elseif direction == "right" then
     vim.cmd("vertical resize -5")
+  elseif direction == "right" then
+    vim.cmd("vertical resize +5")
   elseif direction == "up" then
-    vim.cmd("resize +2")
-  elseif direction == "down" then
     vim.cmd("resize -2")
+  elseif direction == "down" then
+    vim.cmd("resize +2")
   end
 end
 
@@ -806,7 +1545,7 @@ local function move_hub_window(direction)
   end
 end
 
-local function arm_hub_resize(buf)
+local function arm_hub_control(buf)
   if not valid_buf(buf) then return end
 
   local directions = {
@@ -814,43 +1553,44 @@ local function arm_hub_resize(buf)
     ["<Right>"] = "right",
     ["<Up>"] = "up",
     ["<Down>"] = "down",
-    ["<C-Left>"] = "left",
-    ["<C-Right>"] = "right",
-    ["<C-Up>"] = "up",
-    ["<C-Down>"] = "down",
   }
-  local token = (vim.b[buf].agent_hub_resize_token or 0) + 1
-  vim.b[buf].agent_hub_resize_token = token
-  vim.b[buf].agent_hub_resize_pending = true
+  vim.b[buf].agent_hub_control_mode = "move"
 
-  local function clear_resize_maps()
+  local function clear_control_maps()
     if not valid_buf(buf) then return end
-    vim.b[buf].agent_hub_resize_pending = false
+    vim.b[buf].agent_hub_control_mode = nil
     for key in pairs(directions) do
       pcall(vim.keymap.del, { "n", "t" }, key, { buffer = buf })
     end
+    pcall(vim.keymap.del, { "n", "t" }, "r", { buffer = buf })
+    pcall(vim.keymap.del, { "n", "t" }, "m", { buffer = buf })
     map_hub_navigation(buf)
+    vim.keymap.set("n", "q", close_agent_hub,
+      { buffer = buf, desc = "Cerrar AgentHub" })
+    vim.keymap.set("n", "<Esc>", restore_hub_layout,
+      { buffer = buf, desc = "Restaurar tamaño del Hub" })
   end
 
   for key, direction in pairs(directions) do
     vim.keymap.set({ "n", "t" }, key, function()
-      if not vim.b[buf].agent_hub_resize_pending then return end
-      resize_hub_window(direction)
-      local next_token = (vim.b[buf].agent_hub_resize_token or 0) + 1
-      vim.b[buf].agent_hub_resize_token = next_token
-      vim.defer_fn(function()
-    if valid_buf(buf) and vim.b[buf].agent_hub_resize_token == next_token then
-          clear_resize_maps()
-        end
-      end, 1000)
-    end, { buffer = buf, nowait = true, desc = "Aplicar redimensionado " .. direction })
+      if vim.b[buf].agent_hub_control_mode == "resize" then
+        resize_hub_window(direction)
+      else
+        move_hub_window(direction)
+      end
+    end, { buffer = buf, nowait = true, desc = "AgentHub: controlar " .. direction })
   end
 
-  vim.defer_fn(function()
-    if valid_buf(buf) and vim.b[buf].agent_hub_resize_token == token then
-      clear_resize_maps()
-    end
-  end, 2000)
+  vim.keymap.set({ "n", "t" }, "r", function()
+    vim.b[buf].agent_hub_control_mode = "resize"
+  end, { buffer = buf, nowait = true, desc = "AgentHub: modo redimensionar" })
+  vim.keymap.set({ "n", "t" }, "m", function()
+    vim.b[buf].agent_hub_control_mode = "move"
+  end, { buffer = buf, nowait = true, desc = "AgentHub: modo mover" })
+  vim.keymap.set({ "n", "t" }, "<Esc>", clear_control_maps,
+    { buffer = buf, nowait = true, desc = "Salir del modo control del Hub" })
+  vim.keymap.set({ "n", "t" }, "q", clear_control_maps,
+    { buffer = buf, nowait = true, desc = "Salir del modo control del Hub" })
 end
 
 map_hub_navigation = function(buf)
@@ -867,9 +1607,23 @@ map_hub_navigation = function(buf)
     end, { buffer = buf, desc = "Ir al panel " .. direction })
   end
 
-  vim.keymap.set({ "n", "t" }, "<C-A>", function()
-    arm_hub_resize(buf)
-  end, { buffer = buf, desc = "Preparar redimensionado del Hub" })
+  local leader_directions = {
+    ["<leader>a<Left>"] = "left",
+    ["<leader>a<Right>"] = "right",
+    ["<leader>a<Up>"] = "up",
+    ["<leader>a<Down>"] = "down",
+  }
+  for key, direction in pairs(leader_directions) do
+    vim.keymap.set({ "n", "t" }, key, function()
+      move_hub_window(direction)
+    end, { buffer = buf, desc = "AgentHub: ir " .. direction, nowait = true })
+  end
+
+  for _, key in ipairs({ "<C-A>", "<C-@>", "<C-Space>" }) do
+    vim.keymap.set({ "n", "t" }, key, function()
+      arm_hub_control(buf)
+    end, { buffer = buf, desc = "Entrar al modo control del Hub" })
+  end
 end
 
 local function toggle_hub_bottom_terminal()
@@ -885,6 +1639,7 @@ local function toggle_hub_bottom_terminal()
     local cwd = (state[agent_hub.active] or {}).cwd or agent_hub.git_root or vim.fn.getcwd()
     agent_hub.console_buf = vim.api.nvim_create_buf(false, true)
     vim.bo[agent_hub.console_buf].bufhidden = "hide"
+    vim.api.nvim_buf_set_name(agent_hub.console_buf, "Agent Hub Console " .. agent_hub.console_buf)
     vim.api.nvim_win_set_buf(win, agent_hub.console_buf)
     map_hub_navigation(agent_hub.console_buf)
     vim.fn.termopen(vim.o.shell, { cwd = cwd })
@@ -929,29 +1684,38 @@ local function choose_hub_git_folder()
   refresh_hub_changes()
 end
 
-open_hub_repo_menu = function()
+-- `return_buf`: buffer al que volver con q/Esc. Al reabrir el menú desde sí
+-- mismo ("a") se conserva el panel original en vez del menú anterior.
+open_hub_repo_menu = function(return_buf)
   local win = agent_hub.changes_win
   if not (win and vim.api.nvim_win_is_valid(win)) then return end
-  local previous = vim.api.nvim_win_get_buf(win)
+  local previous = valid_buf(return_buf) and return_buf or vim.api.nvim_win_get_buf(win)
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].buftype = "nofile"
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].swapfile = false
   vim.bo[buf].filetype = "agent-repositories"
-  vim.api.nvim_buf_set_name(buf, "Git Hub Repositories")
+  vim.api.nvim_buf_set_name(buf, "Git Hub Repositories " .. buf)
   local lines = {
     " GIT HUB  ·  REPOSITORIOS ACTIVOS",
     "",
-    " Selecciona un repositorio:",
+    " Selecciona uno o varios repositorios (Space/Enter marca):",
     "",
   }
+  agent_hub.selected_git_roots = agent_hub.selected_git_roots or {}
+  for _, root in ipairs(agent_hub.git_roots or {}) do
+    if agent_hub.selected_git_roots[root] == nil then
+      agent_hub.selected_git_roots[root] = true
+    end
+  end
   for index, root in ipairs(agent_hub.git_roots or {}) do
-    local marker = root == agent_hub.git_root and "●" or "○"
+    local marker = agent_hub.selected_git_roots[root] and GIT_ICON or "○"
     lines[#lines + 1] = string.format(" %d  %s  %s", index, marker, vim.fn.fnamemodify(root, ":~"))
   end
   lines[#lines + 1] = ""
   lines[#lines + 1] = " a  agregar repositorio"
   lines[#lines + 1] = " q  volver a cambios"
+  lines = i18n.translate_lines(lines)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.bo[buf].modifiable = false
   vim.api.nvim_win_set_buf(win, buf)
@@ -960,7 +1724,7 @@ open_hub_repo_menu = function()
   local function restore()
     if vim.api.nvim_win_is_valid(win) and valid_buf(previous) then
       vim.api.nvim_win_set_buf(win, previous)
-      style_agent_hub_window(win, "CAMBIOS  ·  Git", false)
+      style_agent_hub_window(win, current_changes_title(), false)
       refresh_hub_changes()
     end
   end
@@ -968,15 +1732,26 @@ open_hub_repo_menu = function()
   vim.keymap.set("n", "<Esc>", restore, { buffer = buf, desc = "Volver a cambios Git" })
   vim.keymap.set("n", "a", function()
     choose_hub_git_folder()
-    if vim.api.nvim_win_is_valid(win) then open_hub_repo_menu() end
+    if vim.api.nvim_win_is_valid(win) then open_hub_repo_menu(previous) end
   end, { buffer = buf, desc = "Agregar repositorio Git" })
-  vim.keymap.set("n", "<CR>", function()
+  local toggle_repository = function()
     local index = vim.fn.line(".") - 4
     local root = (vim.b[buf].git_hub_repo_lines or {})[index]
     if not root then return end
+    agent_hub.selected_git_roots[root] = not agent_hub.selected_git_roots[root]
     agent_hub.git_root = root
-    restore()
-  end, { buffer = buf, desc = "Seleccionar repositorio" })
+    local marker = agent_hub.selected_git_roots[root] and GIT_ICON or "○"
+    vim.bo[buf].modifiable = true
+    vim.api.nvim_buf_set_lines(buf, index + 3, index + 4, false, {
+      string.format(" %d  %s  %s", index, marker, vim.fn.fnamemodify(root, ":~")),
+    })
+    vim.bo[buf].modifiable = false
+    vim.api.nvim_win_set_cursor(win, { index + 4, 0 })
+  end
+  vim.keymap.set("n", "<CR>", toggle_repository,
+    { buffer = buf, desc = "Marcar/desmarcar repositorio" })
+  vim.keymap.set("n", "<Space>", toggle_repository,
+    { buffer = buf, desc = "Marcar/desmarcar repositorio" })
 end
 
 local function search_hub_files()
@@ -1001,9 +1776,25 @@ local function return_to_hub_changes()
       return
     end
     vim.api.nvim_win_set_buf(agent_hub.changes_win, agent_hub.changes_buf)
-    style_agent_hub_window(agent_hub.changes_win, "CAMBIOS  ·  Git", false)
+    style_agent_hub_window(agent_hub.changes_win, current_changes_title(), false)
     refresh_hub_changes()
   end
+end
+
+local function render_hub_diff(buf, entry)
+  local lines = git_output(entry.root, { "diff", "--", entry.path })
+  if #lines == 0 then
+    lines = git_output(entry.root, { "diff", "--cached", "--", entry.path })
+  end
+  if #lines == 0 then
+    lines = { "", " Sin diff disponible: el archivo es nuevo o no está seguido por Git." }
+  end
+  table.insert(lines, 1, " q o Esc · volver a cambios   r · actualizar diff")
+  lines[1] = i18n.translate_line(lines[1])
+  vim.bo[buf].modifiable = true
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+  vim.b[buf].agent_hub_diff_entry = entry
 end
 
 local function open_hub_changed_file()
@@ -1018,29 +1809,29 @@ local function open_hub_changed_file()
   if type(entry) ~= "table" or type(entry.root) ~= "string" or type(entry.path) ~= "string" then
     return false
   end
-  local lines = git_output(entry.root, { "diff", "--", entry.path })
-  if #lines == 0 then
-    lines = git_output(entry.root, { "diff", "--cached", "--", entry.path })
-  end
-  if #lines == 0 then
-    lines = { "", " Sin diff disponible: el archivo es nuevo o no está seguido por Git.", "", " q o Esc · volver a cambios" }
-  else
-    table.insert(lines, 1, " q o Esc · volver a cambios")
-  end
   local buf = vim.api.nvim_create_buf(false, true)
   vim.bo[buf].buftype = "nofile"
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].swapfile = false
   vim.bo[buf].filetype = "diff"
   vim.api.nvim_buf_set_name(buf, "Git Diff " .. entry.path)
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.bo[buf].modifiable = false
+  render_hub_diff(buf, entry)
   vim.api.nvim_win_set_buf(agent_hub.changes_win, buf)
   style_agent_hub_window(agent_hub.changes_win, "DIFF  ·  " .. entry.path, false)
+  vim.wo[agent_hub.changes_win].number = true
+  vim.wo[agent_hub.changes_win].relativenumber = false
+  vim.wo[agent_hub.changes_win].signcolumn = "yes:1"
+  vim.wo[agent_hub.changes_win].foldcolumn = "1"
+  vim.wo[agent_hub.changes_win].scrolloff = 3
+  vim.wo[agent_hub.changes_win].sidescrolloff = 3
   vim.keymap.set("n", "q", return_to_hub_changes, { buffer = buf, desc = "Volver a cambios Git" })
   vim.keymap.set("n", "<Esc>", return_to_hub_changes, { buffer = buf, desc = "Volver a cambios Git" })
   vim.keymap.set("n", "<leader>gb", return_to_hub_changes,
     { buffer = buf, desc = "Git: volver al árbol de cambios" })
+  vim.keymap.set("n", "r", function()
+    local current = vim.b[buf].agent_hub_diff_entry
+    if current then render_hub_diff(buf, current) end
+  end, { buffer = buf, desc = "Actualizar diff" })
   return true
 end
 
@@ -1050,27 +1841,33 @@ local function commit_hub_changes()
     vim.notify("El panel de cambios ya no está disponible. Pulsa r para actualizar.", vim.log.levels.WARN)
     return
   end
+  local line = vim.fn.line(".")
   local file_lines = vim.b[changes_buf].agent_hub_changed_files
-  local candidate = type(file_lines) == "table" and file_lines[vim.fn.line(".")] or nil
-  local selected = type(candidate) == "table" and candidate or nil
+  local folder_lines = vim.b[changes_buf].agent_hub_change_folders
+  local file_entry = type(file_lines) == "table" and file_lines[line] or nil
+  local folder_entry = type(folder_lines) == "table" and folder_lines[line] or nil
+  local selected = (type(file_entry) == "table" and file_entry)
+    or (type(folder_entry) == "table" and folder_entry)
+    or nil
   local root = selected and type(selected.root) == "string" and selected.root
     or (type(agent_hub.git_root) == "string" and agent_hub.git_root or vim.fn.getcwd())
   require("config.git_commit").open(root, function()
     if not is_shutting_down then return_to_hub_changes() end
-  end)
+  end, agent_hub.changes_win)
 end
 
-local function restore_hub_layout()
+restore_hub_layout = function()
   if agent_hub.maximized then
     vim.cmd("wincmd =")
     agent_hub.maximized = false
-    if layout_agent_hub then layout_agent_hub() end
+    if layout_agent_hub then layout_agent_hub(true) end
     return true
   end
   return false
 end
 
 local function toggle_hub_maximize()
+  save_hub_layout()
   if not restore_hub_layout() then
     vim.cmd("wincmd |")
     vim.cmd("wincmd _")
@@ -1078,8 +1875,9 @@ local function toggle_hub_maximize()
   end
 end
 
-layout_agent_hub = function()
+layout_agent_hub = function(force)
   if agent_hub.maximized then return end
+  if agent_hub.layout_initialized and not force then return end
   local sidebar = agent_hub.sidebar_win
   local changes = agent_hub.changes_win
   local command = agent_hub.command_win
@@ -1091,11 +1889,16 @@ layout_agent_hub = function()
   end
 
   local columns = vim.o.columns
-  local sidebar_width = math.min(36, math.max(28, math.floor(columns * 0.20)))
-  local changes_width = math.min(42, math.max(30, math.floor(columns * 0.24)))
+  local default_sidebar_width = math.min(36, math.max(28, math.floor(columns * 0.20)))
+  local default_changes_width = math.min(42, math.max(30, math.floor(columns * 0.24)))
+  local sidebar_width = saved_hub_layout.sidebar_width or default_sidebar_width
+  local changes_width = saved_hub_layout.changes_width or default_changes_width
+  local command_height = saved_hub_layout.command_height or 2
   pcall(vim.api.nvim_win_set_width, sidebar, sidebar_width)
   pcall(vim.api.nvim_win_set_width, changes, changes_width)
-  pcall(vim.api.nvim_win_set_height, command, 2)
+  pcall(vim.api.nvim_win_set_height, command, command_height)
+  agent_hub.layout_initialized = true
+  save_hub_layout()
 end
 
 open_agent_hub = function()
@@ -1158,6 +1961,11 @@ open_agent_hub = function()
       vim.api.nvim_buf_delete(placeholder, { force = true })
     end
   end
+  local current_root = normalize_project_path(vim.fn.getcwd())
+  local registered_roots = registered_project_roots()
+  if not vim.tbl_contains(registered_roots, current_root) then
+    table.insert(registered_roots, current_root)
+  end
   agent_hub = {
     tabpage = tabpage,
     buf = sidebar_buf,
@@ -1168,12 +1976,12 @@ open_agent_hub = function()
     command_win = command_win,
     command_buf = command_buf,
     welcome_buf = welcome_buf,
-    git_root = vim.fn.getcwd(),
-    git_roots = { vim.fn.getcwd() },
+    git_root = current_root,
+    git_roots = registered_roots,
     collapsed_directories = {},
   }
   style_agent_hub_window(sidebar_win, "AGENT HUB  ·  sesiones", true)
-  style_agent_hub_window(changes_win, "CAMBIOS  ·  Git", false)
+  style_agent_hub_window(changes_win, current_changes_title(), false)
   style_agent_hub_window(command_win, "ACCIONES", false)
   style_agent_hub_window(agent_win, "BIENVENIDO", false)
   layout_agent_hub()
@@ -1181,6 +1989,17 @@ open_agent_hub = function()
   vim.api.nvim_create_autocmd("VimResized", {
     group = vim.api.nvim_create_augroup("AgentHubWelcomeCentering", { clear = true }),
     callback = function()
+      if valid_buf(agent_hub.welcome_buf)
+          and agent_hub.agent_win and vim.api.nvim_win_is_valid(agent_hub.agent_win) then
+        save_hub_layout()
+        render_agent_hub_welcome(agent_hub.welcome_buf, vim.api.nvim_win_get_width(agent_hub.agent_win))
+      end
+    end,
+  })
+  vim.api.nvim_create_autocmd("WinResized", {
+    group = vim.api.nvim_create_augroup("AgentHubWelcomeWinCentering", { clear = true }),
+    callback = function()
+      save_hub_layout()
       layout_agent_hub()
       if valid_buf(agent_hub.welcome_buf)
           and agent_hub.agent_win and vim.api.nvim_win_is_valid(agent_hub.agent_win) then
@@ -1192,7 +2011,7 @@ open_agent_hub = function()
 
   local function open_selected_project()
     local entry = selected_hub_entry()
-    if entry and entry.action == "project" then
+    if entry and (entry.action == "project" or entry.action == "project_open") then
       require("config.projects").open(entry.cwd)
     end
   end
@@ -1201,12 +2020,26 @@ open_agent_hub = function()
     local entry = selected_hub_entry()
     if not entry then return end
     if entry.action == "project" then
+      render_project_menu(entry)
+    elseif entry.action == "project_open" then
       open_selected_project()
+    elseif entry.action == "project_agents" then
+      render_project_agents(entry.group)
     elseif entry.action == "new" then
       start_new_instance(entry.name, entry.cmd)
-    else
+    elseif entry.action == "agent" then
       activate_hub_agent(entry.name, entry.cmd, entry.cwd, entry.external)
       style_agent_hub_window(agent_win, entry.name:upper(), false)
+    end
+  end
+
+  local function leave_project_view()
+    if agent_hub.project_view == "agents" and agent_hub.project_group then
+      render_project_menu(agent_hub.project_group)
+    elseif agent_hub.project_view == "menu" then
+      render_agent_hub()
+    else
+      close_agent_hub()
     end
   end
 
@@ -1222,6 +2055,30 @@ open_agent_hub = function()
     end
     stop_agent(entry.name)
     render_agent_hub()
+  end
+
+  local function delete_project_agent()
+    if agent_hub.project_view ~= "agents" or not agent_hub.project_group then return end
+    local entry = selected_hub_entry()
+    if not entry or entry.action ~= "agent" then return end
+    vim.ui.select({ "Eliminar", "Cancelar" }, {
+      prompt = "Eliminar esta sesión del proyecto?",
+    }, function(choice)
+      if choice ~= "Eliminar" then return end
+      if entry.external then
+        if not agent_sessions.remove(entry) then
+          vim.notify("No se pudo eliminar la sesión " .. (entry.kind or "externa"), vim.log.levels.WARN)
+          return
+        end
+      elseif state[entry.name] then
+        stop_agent(entry.name)
+      end
+      local sessions = agent_hub.project_group.sessions or {}
+      agent_hub.project_group.sessions = vim.tbl_filter(function(session)
+        return session.session_id ~= entry.session_id and session.name ~= entry.name
+      end, sessions)
+      render_project_agents(agent_hub.project_group)
+    end)
   end
 
   local function create_new_agent_instance()
@@ -1251,15 +2108,21 @@ open_agent_hub = function()
 
   local function update_hub_hover(line)
     local entry = agent_hub.line_entries and agent_hub.line_entries[line]
-    if entry then
+    if entry and entry.action ~= "noop" then
       agent_hub.selection = entry
       show_hub_hover(entry)
     else
+      agent_hub.selection = nil
       close_hub_hover()
     end
   end
 
-  vim.api.nvim_create_autocmd("CursorMoved", {
+  vim.opt.mousemoveevent = true
+  local hover_events = { "CursorMoved" }
+  if vim.fn.exists("##MouseMoved") == 1 then
+    table.insert(hover_events, "MouseMoved")
+  end
+  vim.api.nvim_create_autocmd(hover_events, {
     buffer = sidebar_buf,
     callback = function()
       update_hub_hover(vim.fn.line("."))
@@ -1280,10 +2143,16 @@ open_agent_hub = function()
     stop_selected_agent()
   end, { buffer = sidebar_buf, desc = "Detener agente seleccionado" })
   vim.keymap.set("n", "i", rename_hub_session, { buffer = sidebar_buf, desc = "Renombrar sesión seleccionada" })
+  vim.keymap.set("n", "g", toggle_hub_project_pin,
+    { buffer = sidebar_buf, desc = "Fijar proyecto o elegir repositorios Git" })
   vim.keymap.set("n", "d", function()
-    local entry = selected_hub_entry()
-    if entry and entry.action == "agent" then show_agent_diff(entry.name) end
-  end, { buffer = sidebar_buf, desc = "Ver cambios del agente" })
+    if agent_hub.project_view == "agents" then
+      delete_project_agent()
+    else
+      local entry = selected_hub_entry()
+      if entry and entry.action == "agent" then show_agent_diff(entry.name) end
+    end
+  end, { buffer = sidebar_buf, desc = "Ver diff o eliminar agente del proyecto" })
   vim.keymap.set("n", "r", function()
     refresh_hub_changes()
     render_agent_hub()
@@ -1297,7 +2166,6 @@ open_agent_hub = function()
       vim.cmd("startinsert")
     end
   end, { buffer = sidebar_buf, desc = "Ir a terminal activa" })
-  vim.keymap.set("n", "g", open_hub_repo_menu, { buffer = sidebar_buf, desc = "Seleccionar repositorio Git" })
   vim.keymap.set("n", "a", authenticate_copilot, { buffer = sidebar_buf, desc = "Autenticar GitHub Copilot" })
   vim.keymap.set("n", "m", toggle_hub_maximize, { buffer = sidebar_buf, desc = "Maximizar/restaurar panel" })
 
@@ -1310,7 +2178,8 @@ open_agent_hub = function()
       local entry = selected_hub_entry()
       if entry and entry.action == "agent" then show_agent_diff(entry.name) end
     end, { buffer = buf, desc = "Ver diff del agente seleccionado" })
-    vim.keymap.set("n", "g", open_hub_repo_menu, { buffer = buf, desc = "Seleccionar repositorio Git" })
+    vim.keymap.set("n", "g", function() open_hub_repo_menu() end,
+      { buffer = buf, desc = "Seleccionar repositorio Git" })
     vim.keymap.set("n", "c", commit_hub_changes, { buffer = buf, desc = "Crear commit con Copilot" })
     vim.keymap.set("n", "a", authenticate_copilot, { buffer = buf, desc = "Autenticar GitHub Copilot" })
     vim.keymap.set("n", "r", refresh_hub_changes, { buffer = buf, desc = "Actualizar cambios" })
@@ -1322,8 +2191,16 @@ open_agent_hub = function()
     if not toggle_changes_folder(changes_buf) and not run_changes_button() and not open_hub_changed_file() then open_selected_agent() end
   end, { buffer = changes_buf, desc = "Ejecutar botón de cambios" })
   vim.keymap.set("n", "<LeftMouse>", function()
+    local mouse = vim.fn.getmousepos()
+    local win = mouse.winid
+    if win == 0 or not vim.api.nvim_win_is_valid(win) then
+      win = vim.api.nvim_get_current_win()
+    end
+    if mouse.line < 1 or vim.api.nvim_win_get_buf(win) ~= changes_buf then return end
+    vim.api.nvim_set_current_win(win)
+    vim.api.nvim_win_set_cursor(win, { mouse.line, 0 })
     if not toggle_changes_folder(changes_buf) and not run_changes_button() then open_hub_changed_file() end
-  end, { buffer = changes_buf, desc = "Pulsar botón de cambios" })
+  end, { buffer = changes_buf, desc = "Pulsar botón de cambios", nowait = true, silent = true })
   for _, buf in ipairs({ sidebar_buf, changes_buf, command_buf, welcome_buf }) do
     map_hub_navigation(buf)
     vim.keymap.set("n", "q", close_agent_hub, { buffer = buf, desc = "Cerrar AgentHub" })
@@ -1337,6 +2214,7 @@ open_agent_hub = function()
     vim.keymap.set("n", "<C-Down>", function() move_hub_window("down") end,
       { buffer = buf, desc = "Ir al panel inferior" })
   end
+  vim.keymap.set("n", "q", leave_project_view, { buffer = sidebar_buf, desc = "Volver en la vista de proyecto" })
 
   render_agent_hub()
   vim.api.nvim_set_current_win(sidebar_win)
@@ -1355,6 +2233,9 @@ close_agent_hub = function()
   end
   if not (tabpage and vim.api.nvim_tabpage_is_valid(tabpage)) then return end
   close_hub_hover()
+  stop_project_spinner()
+  stop_hub_spinner()
+  save_hub_layout()
   local hub_wins = {}
   for _, win in ipairs(vim.api.nvim_tabpage_list_wins(tabpage)) do hub_wins[win] = true end
   vim.api.nvim_set_current_tabpage(tabpage)
@@ -1407,19 +2288,27 @@ toggle_tool = function(name, cmd, cwd)
 
   local buf = vim.api.nvim_create_buf(false, true)
   local win = vim.api.nvim_open_win(buf, true, float_opts(name))
+  vim.api.nvim_buf_set_name(buf, "Agent Terminal " .. name .. " " .. buf)
   map_hub_navigation(buf)
+  local function current_name()
+    return session_name_for_buf(buf, name)
+  end
   vim.fn.termopen(cmd, {
     cwd = cwd,
     on_exit = function()
       if is_shutting_down then return end
       vim.schedule(function()
         if is_shutting_down then return end
-        if agent_hub.active == name and agent_hub.agent_win and vim.api.nvim_win_is_valid(agent_hub.agent_win) then
+        -- Por buffer, no por nombre: la sesión pudo renombrarse, o ya se
+        -- detuvo y otra nueva reutiliza el mismo nombre.
+        local current = session_name_for_buf(buf)
+        if not current then return end
+        if agent_hub.active == current and agent_hub.agent_win and vim.api.nvim_win_is_valid(agent_hub.agent_win) then
           vim.api.nvim_win_set_buf(agent_hub.agent_win, hub_welcome_buffer())
           agent_hub.active = nil
           style_agent_hub_window(agent_hub.agent_win, "BIENVENIDO", false)
         end
-        state[name] = nil
+        state[current] = nil
         render_agent_hub()
         publish_status()
       end)
@@ -1432,19 +2321,19 @@ toggle_tool = function(name, cmd, cwd)
   -- mismos tres se repiten con Alt en AMBOS modos: Alt no lo usa ningún
   -- CLI de estos para texto, así que es seguro interceptarlo siempre.
   vim.keymap.set("n", "q", function()
-    toggle_tool(name, cmd)
+    toggle_tool(current_name(), cmd)
   end, { buffer = buf, desc = "Ocultar " .. name })
   vim.keymap.set("n", "d", function()
-    show_agent_diff(name)
+    show_agent_diff(current_name())
   end, { buffer = buf, desc = "Ver cambios de " .. name .. " (Diffview)" })
   vim.keymap.set({ "n", "t" }, "<A-q>", function()
-    toggle_tool(name, cmd)
+    toggle_tool(current_name(), cmd)
   end, { buffer = buf, desc = "Ocultar " .. name })
   vim.keymap.set({ "n", "t" }, "<A-d>", function()
-    show_agent_diff(name)
+    show_agent_diff(current_name())
   end, { buffer = buf, desc = "Ver cambios de " .. name .. " (Diffview)" })
   vim.keymap.set({ "n", "t" }, "<A-k>", function()
-    stop_agent(name)
+    stop_agent(current_name())
   end, { buffer = buf, desc = "Matar " .. name })
   -- Alt-a = selector rápido de sesiones desde afuera, pero alcanzable
   -- sin salir del agente en el que estás parado.
@@ -1455,11 +2344,14 @@ toggle_tool = function(name, cmd, cwd)
   vim.api.nvim_create_autocmd("WinClosed", {
     callback = function()
       if is_shutting_down then return end
+      -- true elimina este autocmd cuando la sesión ya no existe.
+      if not session_name_for_buf(buf) then return true end
       vim.schedule(function()
         if is_shutting_down then return end
-        local session = state[name]
+        local current = session_name_for_buf(buf)
+        local session = current and state[current]
         if not session or session_is_visible(session) then return end
-        if agent_hub.active == name then
+        if agent_hub.active == current then
           agent_hub.active = nil
           if agent_hub.agent_win and vim.api.nvim_win_is_valid(agent_hub.agent_win) then
             vim.api.nvim_win_set_buf(agent_hub.agent_win, hub_welcome_buffer())
@@ -1551,7 +2443,7 @@ vim.api.nvim_create_autocmd("VimLeavePre", {
   end,
 })
 
-STATUS_ICON = { visible = "●", oculto = "○", disponible = "◇", detenido = "◌" }
+STATUS_ICON = { visible = "●", activo = "●", ejecutando = "●", oculto = "○", disponible = "◇", detenido = "◌" }
 
 -- Agentes base + cualquier instancia extra ya corriendo ("Claude Code #2")
 -- + una opción "+ nueva instancia" por cada herramienta.
@@ -1790,6 +2682,9 @@ vim.api.nvim_create_user_command("Gemini", tool_command("Gemini", "gemini"),
 vim.api.nvim_create_user_command("CopilotCli", tool_command("Copilot", "copilot"),
   { nargs = "*", bang = true, desc = "Mostrar/ocultar GitHub Copilot CLI (! = nueva instancia)" })
 
+vim.api.nvim_create_user_command("Grok", tool_command("Grok", "grok"),
+  { nargs = "*", bang = true, desc = "Mostrar/ocultar Grok CLI (! = nueva instancia)" })
+
 vim.api.nvim_create_user_command("Agents", open_agent_hub, { desc = "Hub de sesiones, terminal y cambios Git" })
 
 vim.api.nvim_create_user_command("AgentWorkspace", function(cmd_opts)
@@ -1842,6 +2737,7 @@ vim.cmd("cnoreabbrev codex Codex")
 vim.cmd("cnoreabbrev opencode OpenCode")
 vim.cmd("cnoreabbrev gemini Gemini")
 vim.cmd("cnoreabbrev copilotcli CopilotCli")
+vim.cmd("cnoreabbrev grok Grok")
 vim.cmd("cnoreabbrev agents Agents")
 vim.cmd("cnoreabbrev agentdiff AgentDiff")
 vim.cmd("cnoreabbrev agentkill AgentKill")

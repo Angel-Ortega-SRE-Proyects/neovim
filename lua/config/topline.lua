@@ -29,7 +29,7 @@ end
 
 function M.setup()
   vim.o.showtabline = 2
-  vim.o.tabline = "%!v:lua.require('config.topline').render()"
+  vim.o.tabline = "%!v:lua.require'config.topline'.render()"
   sysmonitor.start(3000)
   agent_usage.start(15000)
   local function set_highlights()
@@ -42,8 +42,10 @@ function M.setup()
     group = vim.api.nvim_create_augroup("ToplineHighlights", { clear = true }),
     callback = set_highlights,
   })
-  local timer = vim.uv.new_timer()
-  timer:start(1000, 3000, vim.schedule_wrap(function()
+  -- Idempotente: :ConfigReload vuelve a llamar setup().
+  if M.timer then return end
+  M.timer = vim.uv.new_timer()
+  M.timer:start(1000, 3000, vim.schedule_wrap(function()
     pcall(vim.cmd.redrawtabline)
   end))
 end

@@ -75,7 +75,7 @@ end
 local function filename()
   local name = vim.fn.expand("%:t")
   if name == "" then
-    return "[No Name]"
+    return "[Sin nombre]"
   end
   local modified = vim.bo.modified and " %#StatuslineWarn#●%#StatusLine#" or ""
   return name .. modified
@@ -90,7 +90,7 @@ local function buffers()
     local buftype = vim.bo[info.bufnr].buftype
     local filetype = vim.bo[info.bufnr].filetype
     if buftype == "" and filetype ~= "NvimTree" then
-      local name = info.name ~= "" and vim.fn.fnamemodify(info.name, ":t") or "[No Name]"
+      local name = info.name ~= "" and vim.fn.fnamemodify(info.name, ":t") or "[Sin nombre]"
       if #name > 18 then
         name = name:sub(1, 17) .. "…"
       end
@@ -178,7 +178,7 @@ end
 function M.setup()
   vim.o.laststatus = 3
   vim.o.showtabline = 0
-  vim.o.statusline = "%!v:lua.require('config.statusline').render()"
+  vim.o.statusline = "%!v:lua.require'config.statusline'.render()"
 
   set_highlights()
   vim.api.nvim_create_autocmd("ColorScheme", {
@@ -189,8 +189,11 @@ function M.setup()
   -- Los agentes de IA (lua/plugins/ai_cli.lua) cambian de estado solos, no
   -- por moverte en el buffer; fuerza redibujar la barra cada pocos segundos
   -- para que el indicador ●/○ se vea "en tiempo real".
-  local timer = vim.uv.new_timer()
-  timer:start(
+  -- Idempotente: :ConfigReload vuelve a llamar setup() y sin esta guarda
+  -- se acumulaba un timer extra por cada recarga.
+  if M.timer then return end
+  M.timer = vim.uv.new_timer()
+  M.timer:start(
     2000,
     2000,
     vim.schedule_wrap(function()

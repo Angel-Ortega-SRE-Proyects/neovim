@@ -65,6 +65,13 @@ el comando y cierra el menú en una pulsación. En `:ThemeSelect`, `j/k`, las
 flechas o `1-8` cambian la selección; `Enter` aplica y `q`/`Esc` cancela. El
 tema activo aparece en la barra inferior.
 
+## Idioma de la interfaz
+
+La interfaz incluye español (`es`, predeterminado) e inglés (`en`). Usa
+`:LanguageSelect` o `<leader>ul` para abrir el selector, o ejecuta
+`:LanguageSet es` / `:LanguageSet en`. La elección se guarda en el estado de
+Neovim y se conserva al volver a abrirlo.
+
 ## Reproducibilidad
 
 - `lazy-lock.json` **debe** commitearse: fija el commit exacto de cada plugin.
@@ -74,14 +81,37 @@ tema activo aparece en la barra inferior.
 ## Espacio de trabajo de agentes
 
 `<leader>aa` (o `:Agents`) abre el Agent Hub con las sesiones locales de los
-agentes. Además de las terminales administradas por Neovim, muestra las
-sesiones interactivas guardadas por Codex con la etiqueta `Codex · ...`; al
-abrir una, se reanuda mediante `codex resume`. Pulsa `r` para volver a leer la
-lista de sesiones. Las sesiones de Codex aparecen agrupadas por ruta de
-proyecto; pulsa `Enter` o `p` sobre el grupo para abrir esa ruta en su pestaña
-de proyecto y revisar sus archivos y cambios Git. En cualquier panel del Hub,
-`Ctrl+A` seguido de una flecha cambia su tamaño; puedes mantener la flecha
-presionada para repetir el ajuste. `Ctrl+Flecha` cambia el panel enfocado.
+agentes y todos los proyectos registrados por `:Projects`. Al seleccionar un
+proyecto, `Enter` muestra las acciones compactas para abrirlo o consultar sus
+agentes; `p` lo abre directamente en su pestaña propia. La lista muestra las
+sesiones activas de ese proyecto y hasta cinco aparecen resumidas; las
+que están ejecutando una tarea usan un indicador
+animado y los que esperan usan un punto fijo. El nombre se mantiene compacto
+en la lista y el hover muestra ruta,
+último acceso y estado de cambios. Además, las sesiones interactivas guardadas
+por cada agente aparecen agrupadas por ruta y se reanudan mediante `Enter`.
+
+Solo se activan los agentes cuya CLI está instalada en `$PATH`; lo mismo aplica
+a la lista `NUEVA INSTANCIA`. Fuentes de sesiones (`lua/config/agent_sessions/`):
+
+| Agente | Almacenamiento leído | Reanudar |
+|--------|----------------------|----------|
+| Claude Code | `~/.claude/projects/*/*.jsonl` (estado en `~/.claude/sessions/`) | `claude --resume <id>` |
+| Codex | `~/.codex/sessions/**/*.jsonl` | `codex resume <id>` |
+| OpenCode | `~/.local/share/opencode/opencode.db` (requiere `sqlite3`) | `opencode -s <id>` |
+| Gemini | `~/.gemini/tmp/*/chats/*.jsonl` | `gemini --resume <id>` |
+| Copilot | `~/.copilot/session-state/*/` | `copilot --resume=<id>` |
+| Grok | `~/.grok/sessions/*/*/summary.json` | `grok --resume <id>` |
+
+`:Grok` abre Grok CLI igual que `:Claude`, `:Codex` o `:Gemini`.
+La barra inferior concentra los comandos disponibles del Hub. En cualquier
+panel, `Ctrl+A` o `Ctrl+Space`, luego `r` y una flecha, cambia su tamaño; puedes
+mantener la flecha presionada para repetir el ajuste. `Ctrl+Flecha` cambia el
+panel enfocado.
+
+En la lista de proyectos, `g` fija o desfija el proyecto seleccionado; los
+fijados aparecen primero con el prefijo `g`. También puedes usar
+`:ProjectPin [ruta]`.
 
 `<leader>aw` (o `:AgentWorkspace [agente]`) muestra un agente a la izquierda
 y el estado de cambios Git a la derecha, en dos columnas que ocupan toda la
@@ -105,6 +135,31 @@ Desde un picker o Diffview, usa `q`, `<Esc>` o `:GitBack` para volver a Git Hub.
 
 La creación de commits en AgentHub (`c`) y Git Hub usa un buffer `gitcommit`;
 Copilot puede sugerir el mensaje y `Tab` lo acepta. Guarda con `:w` o `<C-s>`.
+
+## Pruebas
+
+La suite (plenary/busted) cubre núcleo, proyectos, Git, barras y temas,
+sesiones de agentes, Agent Hub y plugins. Se ejecuta en un entorno aislado
+(`HOME` y `XDG_*` temporales), así que nunca toca tus proyectos, tema ni
+sesiones reales:
+
+```sh
+tests/run.sh                            # toda la suite
+tests/run.sh tests/spec/git_spec.lua    # un solo archivo
+```
+
+| Archivo | Cubre |
+|---------|-------|
+| `core_spec.lua` | opciones, atajos globales, autocmds, perfiles de buffer |
+| `projects_spec.lua` | registro, fijado, alias, pestañas y comandos de proyectos |
+| `git_spec.lua` | `config.git`, Git Hub y commits reales en repos temporales |
+| `ui_spec.lua` | statusline, franja superior, monitor, temas, `:Commands`, cuotas |
+| `agent_sessions_spec.lua` | los seis proveedores de sesiones y el agregador |
+| `agent_hub_spec.lua` | ciclo de vida de agentes y vistas del Agent Hub |
+| `plugins_spec.lua` | specs de lazy, terminales, `htx`, recarga en caliente |
+
+Los helpers compartidos viven en `tests/spec_helpers.lua`. Cada cambio de
+comportamiento debe venir con su test.
 
 ## Próximos pasos
 

@@ -48,17 +48,17 @@ end
 
 vim.api.nvim_create_user_command("HtxInit", function(cmd_opts)
   local profile = cmd_opts.args ~= "" and cmd_opts.args or DEFAULT_PROFILE
-  run_oneshot("htx init", string.format("htx init %s --assistant %s", profile, DEFAULT_ASSISTANT))
+  run_oneshot("htx init", { "htx", "init", profile, "--assistant", DEFAULT_ASSISTANT })
 end, { nargs = "?", desc = "htx init [profile]" })
 
 vim.api.nvim_create_user_command("HtxProfile", function(cmd_opts)
   local name = cmd_opts.args ~= "" and cmd_opts.args or DEFAULT_PROFILE
-  run_oneshot("htx profile load", string.format("htx profile load %s --assistant %s", name, DEFAULT_ASSISTANT))
+  run_oneshot("htx profile load", { "htx", "profile", "load", name, "--assistant", DEFAULT_ASSISTANT })
 end, { nargs = "?", desc = "htx profile load [name]" })
 
 vim.api.nvim_create_user_command("HtxRules", function(cmd_opts)
   local rules = cmd_opts.args ~= "" and cmd_opts.args or DEFAULT_RULES
-  run_oneshot("htx load-rules", string.format("htx task load-rules --rules %s", rules))
+  run_oneshot("htx load-rules", { "htx", "task", "load-rules", "--rules", rules })
 end, { nargs = "?", desc = "htx task load-rules [ids|all]" })
 
 vim.keymap.set("n", "<leader>hi", "<cmd>HtxInit<CR>", { desc = "htx init" })

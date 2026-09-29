@@ -10,6 +10,8 @@
 --   <leader>mv   abrir una vista renderizada al lado
 --   <leader>mp   abrir preview en el navegador (Mermaid incluido)
 --   <leader>ms   detener el preview
+local t = require("config.i18n").t
+
 return {
   {
     "MeanderingProgrammer/render-markdown.nvim",
@@ -115,8 +117,8 @@ return {
       }
     end,
     keys = {
-      { "<leader>mp", "<cmd>MarkdownPreview<CR>", desc = "Markdown preview (navegador, con Mermaid)", ft = "markdown" },
-      { "<leader>ms", "<cmd>MarkdownPreviewStop<CR>", desc = "Detener markdown preview", ft = "markdown" },
+      { "<leader>mp", "<cmd>MarkdownPreview<CR>", desc = t("Vista previa Markdown (navegador, con Mermaid)"), ft = "markdown" },
+      { "<leader>ms", "<cmd>MarkdownPreviewStop<CR>", desc = t("Detener vista previa Markdown"), ft = "markdown" },
     },
   },
 }

@@ -1,4 +1,5 @@
 local M = {}
+local i18n = require("config.i18n")
 
 local mode = {}
 local render
@@ -19,6 +20,11 @@ end
 local function in_repo()
   vim.fn.system("git rev-parse --is-inside-work-tree")
   return vim.v.shell_error == 0
+end
+
+local function repo_root()
+  local result = vim.fn.systemlist("git rev-parse --show-toplevel")
+  return vim.v.shell_error == 0 and result[1] or vim.fn.getcwd()
 end
 
 local function run_if_repo(action)
@@ -88,7 +94,7 @@ local function actions()
     { "󰐕  Stage del archivo actual", function() run_if_repo(function() require("gitsigns").stage_buffer() end) end },
     { "󰜘  Crear commit con Copilot", function()
       run_if_repo(function()
-        require("config.git_commit").open(vim.fn.getcwd(), function() M.open(true) end)
+        require("config.git_commit").open(repo_root(), function() M.open(true) end, mode.win)
       end)
     end },
     { "󰑐  Actualizar Git Hub", function() M.open(true) end },
@@ -105,7 +111,8 @@ render = function(buf)
     "   GIT HUB  ·  CONTROL DE REPOSITORIO",
     "   ─────────────────────────────────────────",
     "",
-    "     " .. vim.fn.getcwd(),
+    "     Repositorio: " .. vim.fn.fnamemodify(repo_root(), ":t"),
+    "      Ruta: " .. vim.fn.fnamemodify(repo_root(), ":~"),
     "",
     "   ACCIONES",
     "   ─────────",
@@ -118,6 +125,7 @@ render = function(buf)
   lines[#lines + 1] = ""
   lines[#lines + 1] = "   Enter ejecutar   ·   r actualizar   ·   q cerrar"
   lines[#lines + 1] = "   Esc / :GitBack volver al menú desde cualquier vista"
+  lines = i18n.translate_lines(lines)
   vim.bo[buf].modifiable = true
   local ok, err = pcall(vim.api.nvim_buf_set_lines, buf, 0, -1, false, lines)
   vim.bo[buf].modifiable = false
@@ -129,12 +137,13 @@ render = function(buf)
   vim.api.nvim_buf_add_highlight(buf, git_namespace, "Title", 0, 0, -1)
   vim.api.nvim_buf_add_highlight(buf, git_namespace, "Directory", 3, 0, -1)
   vim.api.nvim_buf_add_highlight(buf, git_namespace, "Comment", 5, 0, -1)
-  vim.api.nvim_buf_add_highlight(buf, git_namespace, "Comment", 7 + #actions(), 0, -1)
+  vim.api.nvim_buf_add_highlight(buf, git_namespace, "Comment", #lines - 2, 0, -1)
+  vim.api.nvim_buf_add_highlight(buf, git_namespace, "Comment", #lines - 1, 0, -1)
   return true
 end
 
 local function execute_selected(buf)
-  local action = actions()[vim.fn.line(".") - 8]
+  local action = actions()[vim.fn.line(".") - 9]
   if action then action[2]() end
 end
 
@@ -191,7 +200,7 @@ function M.open(refresh)
     height = height,
     style = "minimal",
     border = "rounded",
-    title = " Git Hub ",
+    title = " " .. i18n.translate_line("Git Hub") .. " ",
     title_pos = "center",
   })
   vim.wo[mode.win].cursorline = true
@@ -202,7 +211,7 @@ function M.open(refresh)
     return
   end
   local last_line = vim.api.nvim_buf_line_count(mode.buf)
-  pcall(vim.api.nvim_win_set_cursor, mode.win, { math.min(9, last_line), 0 })
+  pcall(vim.api.nvim_win_set_cursor, mode.win, { math.min(10, last_line), 0 })
 end
 
 function M.open_copilot()
@@ -217,6 +226,8 @@ function M.setup_keymaps()
   vim.keymap.set("n", "<leader>gc", M.open_copilot, { desc = "Abrir GitHub Copilot" })
   vim.api.nvim_create_user_command("GitBack", M.back,
     { desc = "Volver al menú Git", force = true })
+  vim.api.nvim_create_user_command("GitBask", M.back,
+    { desc = "Alias de salida del modo Git", force = true })
 end
 
 return M

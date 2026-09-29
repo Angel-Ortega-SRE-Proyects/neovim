@@ -1,13 +1,15 @@
 -- Explorador de archivos estilo VSCode (panel lateral fijo).
 -- Personaliza a tu gusto: ancho, iconos, comportamiento de apertura, etc.
+local t = require("config.i18n").t
+
 return {
   "nvim-tree/nvim-tree.lua",
   version = "*",
   dependencies = { "nvim-tree/nvim-web-devicons" },
   lazy = false,
   keys = {
-    { "<leader>e", "<cmd>NvimTreeToggle<CR>", desc = "Toggle file explorer" },
-    { "<leader>eh", "<cmd>FilesHidden<CR>", desc = "Alternar archivos ocultos" },
+    { "<leader>e", "<cmd>NvimTreeToggle<CR>", desc = t("Mostrar/ocultar explorador") },
+    { "<leader>eh", "<cmd>FilesHidden<CR>", desc = t("Alternar archivos ocultos") },
   },
   init = function()
     vim.api.nvim_create_user_command("FilesHidden", function()

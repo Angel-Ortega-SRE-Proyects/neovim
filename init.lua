@@ -9,6 +9,7 @@ vim.g.maplocalleader = " "
 vim.g.loaded_zipPlugin = 1
 vim.g.loaded_tarPlugin = 1
 
+local i18n = require("config.i18n")
 require("config.options")
 require("config.keymaps")
 require("config.project_settings").setup()
@@ -70,12 +71,14 @@ vim.api.nvim_create_user_command("ConfigReload", function()
   cleanup_agent_hub_buffers()
   package.loaded["config.agent_hub_reload"] = nil
   require("config.agent_hub_reload").apply()
+  package.loaded["config.git"] = nil
+  require("config.git").reapply_view_navigation()
   reload_theme_module().reload()
   vim.api.nvim_echo({
-    { "Configuración recargada: ", "Normal" },
+    { i18n.t("Configuración recargada: "), "Normal" },
     { config_file, "String" },
   }, false, {})
 end, {
-  desc = "Recargar la configuración de Neovim",
+  desc = i18n.t("Recargar la configuración de Neovim"),
   force = true,
 })

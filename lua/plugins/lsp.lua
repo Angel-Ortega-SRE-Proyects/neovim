@@ -1,3 +1,5 @@
+local t = require("config.i18n").t
+
 return {
   {
     "williamboman/mason.nvim",
@@ -42,13 +44,13 @@ return {
         group = vim.api.nvim_create_augroup("LspKeymaps", { clear = true }),
         callback = function(event)
           local map = function(keys, fn, desc)
-            vim.keymap.set("n", keys, fn, { buffer = event.buf, desc = "LSP: " .. desc })
+            vim.keymap.set("n", keys, fn, { buffer = event.buf, desc = "LSP: " .. t(desc) })
           end
-          map("gd", vim.lsp.buf.definition, "Goto definition")
-          map("gr", vim.lsp.buf.references, "Goto references")
-          map("K", vim.lsp.buf.hover, "Hover")
-          map("<leader>rn", vim.lsp.buf.rename, "Rename")
-          map("<leader>d", vim.diagnostic.open_float, "Diagnostic float")
+          map("gd", vim.lsp.buf.definition, "Ir a la definición")
+          map("gr", vim.lsp.buf.references, "Ir a las referencias")
+          map("K", vim.lsp.buf.hover, "Mostrar documentación")
+          map("<leader>rn", vim.lsp.buf.rename, "Renombrar símbolo")
+          map("<leader>d", vim.diagnostic.open_float, "Diagnóstico flotante")
         end,
       })
 

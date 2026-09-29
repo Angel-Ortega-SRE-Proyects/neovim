@@ -2,6 +2,7 @@
 -- capa de colores propia para que el fondo y la UI cambien con cada preset.
 local previous = package.loaded["config.theme"]
 local M = {}
+local t = require("config.i18n").t
 
 M.colors = {
   bg = "#1c1c1c", -- carbón / dashboard
@@ -273,7 +274,7 @@ function M.select()
     col = math.floor((vim.o.columns - width) / 2),
     style = "minimal",
     border = "rounded",
-    title = " Tema · elegir ",
+    title = " " .. t("Tema · elegir") .. " ",
     title_pos = "center",
   })
 
@@ -293,14 +294,14 @@ function M.select()
 
   local function render()
     local lines = {
-      "  Temas disponibles",
-      "  j/k o ↑/↓ · Enter aplicar · 1-8 elegir · q/Esc cancelar",
+      "  " .. t("Temas disponibles"),
+      "  " .. t("j/k o ↑/↓ · Enter aplicar · 1-8 elegir · q/Esc cancelar"),
       "",
     }
     for index, name in ipairs(names) do
       local theme = M.themes[name]
       local marker = index == current and "●" or " "
-      local active = name == M.active and "  activo" or ""
+      local active = name == M.active and "  " .. t("activo") or ""
       lines[#lines + 1] = string.format(" %s %d  %-14s %-28s%s", marker, index, theme.label, theme.description, active)
     end
     vim.bo[buffer].modifiable = true
@@ -370,11 +371,11 @@ function M.select()
 end
 
 vim.api.nvim_create_user_command("ThemeReload", M.reload, {
-  desc = "Recargar la paleta del tema",
+  desc = t("Recargar la paleta del tema"),
   force = true,
 })
 vim.api.nvim_create_user_command("ThemeSelect", M.select, {
-  desc = "Seleccionar paleta de colores",
+  desc = t("Seleccionar paleta de colores"),
   force = true,
 })
 
