@@ -11,6 +11,10 @@ hello.txt
 /.claude/
 /.memory/
 /.claudeignore
+/AGENTS.md
+/task.md
+/implementation_plan.md
+/walkthrough.md
 /.vscode/
 /.idea/
 /.mcp.json
