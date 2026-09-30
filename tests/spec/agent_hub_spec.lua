@@ -105,6 +105,12 @@ describe("AgentHub: comandos y agentes instalados", function()
     assert.is_nil(lines:find("+ Gemini", 1, true))
     assert.is_nil(lines:find("+ OpenCode", 1, true))
   end)
+
+  it("desactiva Espacio+e dentro de AgentHub", function()
+    local sidebar = open_hub()
+    focus(sidebar)
+    assert.equals("<Nop>", vim.fn.maparg(" e", "n", false, true).rhs)
+  end)
 end)
 
 describe("AgentHub: ciclo de vida de un agente", function()

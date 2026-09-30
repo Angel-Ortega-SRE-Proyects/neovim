@@ -79,6 +79,15 @@ local function remove_hidden_file_buffer(args)
   end)
 end
 
+-- Vuelve a aplicar el perfil a los buffers ya visibles (FileType no se
+-- dispara de nuevo tras :ConfigReload).
+function M.reapply()
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    local buf = vim.api.nvim_win_get_buf(win)
+    vim.api.nvim_win_call(win, function() apply_profile({ buf = buf }) end)
+  end
+end
+
 function M.setup()
   local group = vim.api.nvim_create_augroup("ActiveBufferSettings", { clear = true })
   vim.api.nvim_create_autocmd("FileType", {

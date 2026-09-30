@@ -56,23 +56,24 @@
 --                pantalla completa: agente a la izquierda y cambios Git a
 --                la derecha. En el panel de cambios, r lo actualiza.
 
+if not require("config.integrations").enabled("agent_hub") then return {} end
+
 local agent_sessions = require("config.agent_sessions")
+local agent_adapters = require("config.agent_adapters")
 local i18n = require("config.i18n")
 if type(agent_sessions.providers) ~= "function" or type(agent_sessions.remove) ~= "function" then
   package.loaded["config.agent_sessions"] = nil
   agent_sessions = require("config.agent_sessions")
 end
 -- Solo se ofrecen los agentes cuya CLI está instalada en el sistema.
-local AGENTS = vim.tbl_filter(function(agent)
-  return agent_sessions.is_installed(agent.cmd)
-end, {
-  { name = "Claude Code", cmd = "claude" },
-  { name = "Codex", cmd = "codex" },
-  { name = "OpenCode", cmd = "opencode" },
-  { name = "Gemini", cmd = "gemini" },
-  { name = "Copilot", cmd = "copilot" },
-  { name = "Grok", cmd = "grok" },
-})
+local AGENTS = vim.tbl_map(function(adapter)
+  return {
+    id = adapter.id,
+    name = adapter.name,
+    cmd = adapter.cli,
+    command = adapter.command,
+  }
+end, agent_adapters.available())
 local project_registry = require("config.projects")
 if type(project_registry.toggle_pin) ~= "function" then
   package.loaded["config.projects"] = nil
@@ -1596,6 +1597,12 @@ end
 
 map_hub_navigation = function(buf)
   if not valid_buf(buf) then return end
+  vim.keymap.set("n", "<leader>e", "<Nop>", {
+    buffer = buf,
+    desc = "Explorador desactivado dentro de AgentHub",
+    nowait = true,
+    silent = true,
+  })
   local directions = {
     ["<C-Left>"] = "left",
     ["<C-Right>"] = "right",
@@ -2665,28 +2672,42 @@ local function tool_command(base, bin)
   end
 end
 
-vim.api.nvim_create_user_command("Claude", tool_command("Claude Code", "claude"),
-  { nargs = "*", bang = true, desc = "Mostrar/ocultar Claude Code (! = nueva instancia)" })
-
-vim.api.nvim_create_user_command("Codex", tool_command("Codex", "codex"),
-  { nargs = "*", bang = true, desc = "Mostrar/ocultar Codex (! = nueva instancia)" })
-
-vim.api.nvim_create_user_command("OpenCode", tool_command("OpenCode", "opencode"),
-  { nargs = "*", bang = true, desc = "Mostrar/ocultar OpenCode (! = nueva instancia)" })
-
-vim.api.nvim_create_user_command("Gemini", tool_command("Gemini", "gemini"),
-  { nargs = "*", bang = true, desc = "Mostrar/ocultar Gemini (! = nueva instancia)" })
-
--- "CopilotCli", no "Copilot" -- ese nombre ya lo usa zbirenbaum/copilot.lua
--- (:Copilot auth/status/panel, el de la sugerencia ghost-text) y pisarlo
--- rompería ese comando.
-vim.api.nvim_create_user_command("CopilotCli", tool_command("Copilot", "copilot"),
-  { nargs = "*", bang = true, desc = "Mostrar/ocultar GitHub Copilot CLI (! = nueva instancia)" })
-
-vim.api.nvim_create_user_command("Grok", tool_command("Grok", "grok"),
-  { nargs = "*", bang = true, desc = "Mostrar/ocultar Grok CLI (! = nueva instancia)" })
-
 vim.api.nvim_create_user_command("Agents", open_agent_hub, { desc = "Hub de sesiones, terminal y cambios Git" })
+
+for _, adapter in ipairs(agent_adapters.enabled()) do
+  vim.api.nvim_create_user_command(adapter.command, tool_command(adapter.name, adapter.cli), {
+    nargs = "*",
+    bang = true,
+    desc = "Mostrar/ocultar " .. adapter.name .. " (! = nueva instancia)",
+  })
+end
+
+local function agent_rule_complete(arg_lead)
+  return vim.tbl_filter(function(name)
+    return name:lower():find(arg_lead:lower(), 1, true) == 1
+  end, agent_adapters.names(false))
+end
+
+vim.api.nvim_create_user_command("AgentRules", function(cmd_opts)
+  local adapter = agent_adapters.get(cmd_opts.args) or agent_adapters.get(agent_adapters.default_id())
+  if not adapter then
+    vim.notify("No hay un adaptador de agente configurado", vim.log.levels.WARN)
+    return
+  end
+  local path = agent_adapters.rule_file(adapter.id)
+  if not path then
+    path = agent_adapters.rules_for(adapter.id)[1]
+  end
+  if not path then
+    vim.notify("El adaptador no define archivos de reglas: " .. adapter.name, vim.log.levels.WARN)
+    return
+  end
+  vim.cmd("edit " .. vim.fn.fnameescape(path))
+end, {
+  nargs = "?",
+  complete = agent_rule_complete,
+  desc = "Abrir las reglas del agente en el proyecto actual",
+})
 
 vim.api.nvim_create_user_command("AgentWorkspace", function(cmd_opts)
   open_agent_workspace_picker(cmd_opts.args)
@@ -2733,12 +2754,9 @@ vim.api.nvim_create_user_command("AgentHubClose", close_agent_hub,
 -- Vim exige mayúscula inicial en comandos de usuario (:Claude, no :claude);
 -- estas abreviaciones de línea de comandos permiten escribir en minúscula
 -- como el binario real, sin duplicar la definición del comando.
-vim.cmd("cnoreabbrev claude Claude")
-vim.cmd("cnoreabbrev codex Codex")
-vim.cmd("cnoreabbrev opencode OpenCode")
-vim.cmd("cnoreabbrev gemini Gemini")
-vim.cmd("cnoreabbrev copilotcli CopilotCli")
-vim.cmd("cnoreabbrev grok Grok")
+for _, adapter in ipairs(agent_adapters.enabled()) do
+  vim.cmd("cnoreabbrev " .. adapter.command:lower() .. " " .. adapter.command)
+end
 vim.cmd("cnoreabbrev agents Agents")
 vim.cmd("cnoreabbrev agentdiff AgentDiff")
 vim.cmd("cnoreabbrev agentkill AgentKill")

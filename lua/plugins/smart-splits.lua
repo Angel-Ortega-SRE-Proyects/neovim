@@ -1,13 +1,15 @@
 -- Navegación de splits que cruza la frontera Neovim <-> panes de tmux
 -- (requiere el snippet en ~/.tmux.conf que reenvía C-Flechas al pane activo).
 local t = require("config.i18n").t
+local platform = require("config.platform")
+if not require("config.integrations").enabled("smart_splits") then return {} end
 
 return {
   "mrjones2014/smart-splits.nvim",
   lazy = false,
   opts = {
     ignored_filetypes = { "NvimTree" },
-    multiplexer_integration = "tmux",
+    multiplexer_integration = platform.executable("tmux") and "tmux" or nil,
   },
   keys = {
     -- mode = { "n", "t" }: en modo terminal (dentro de :Term, :Claude,

@@ -1,5 +1,6 @@
 local augroup = vim.api.nvim_create_augroup
 local autocmd = vim.api.nvim_create_autocmd
+local platform = require("config.platform")
 
 -- Highlight on yank
 autocmd("TextYankPost", {
@@ -141,7 +142,7 @@ local function poll_terminal_cwd()
       local job = vim.b[buf].terminal_job_id
       local ok, pid = pcall(vim.fn.jobpid, job)
       if job and ok and pid then
-        local dir = vim.uv.fs_readlink("/proc/" .. pid .. "/cwd")
+        local dir = platform.process_cwd(pid)
         if dir and dir ~= last_dir[buf] and dir ~= vim.fn.getcwd() then
           last_dir[buf] = dir
           vim.schedule(function()
@@ -178,7 +179,7 @@ autocmd("BufReadCmd", {
   pattern = ext_pattern,
   callback = function(args)
     local path = args.file
-    vim.fn.jobstart({ "xdg-open", path }, { detach = true })
+    vim.fn.jobstart(platform.open_external_command(path), { detach = true })
     vim.schedule(function()
       vim.notify("Abriendo con la app del sistema: " .. vim.fn.fnamemodify(path, ":t"), vim.log.levels.INFO)
       if vim.api.nvim_buf_is_valid(args.buf) then

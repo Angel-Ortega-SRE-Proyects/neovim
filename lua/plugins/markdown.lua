@@ -30,13 +30,28 @@ return {
         icons = { "", "", "", "", "", "" },
         left_margin = 1,
         right_pad = 1,
+        -- Línea virtual en blanco arriba y abajo de cada título para
+        -- separarlo del texto (invisible: mismo color que el fondo).
+        border = true,
+        border_virtual = true,
+        above = " ",
+        below = " ",
       },
+      -- Texto, listas y código con más sangría que los títulos (margen 1)
+      -- para que se note a qué título pertenecen.
       paragraph = {
-        left_margin = 1,
+        left_margin = 3,
+      },
+      bullet = {
+        icons = { "▸", "▹", "▪", "▫" },
+        left_pad = 2,
       },
       code = {
+        -- Bloques de código con bordes superior/inferior para distinguirlos
+        -- del texto que los rodea.
+        border = "thin",
         width = "block",
-        left_margin = 1,
+        left_margin = 3,
         left_pad = 1,
         right_pad = 1,
         language_icon = false,
@@ -50,6 +65,8 @@ return {
       win_options = {
         wrap = { default = vim.o.wrap, rendered = true },
         linebreak = { default = vim.o.linebreak, rendered = true },
+        -- Las líneas envueltas de un ítem siguen alineadas con su texto.
+        breakindent = { default = vim.o.breakindent, rendered = true },
         number = { default = vim.o.number, rendered = false },
         relativenumber = { default = vim.o.relativenumber, rendered = false },
       },
@@ -62,10 +79,14 @@ return {
 
       local function apply_markdown_highlights()
         local colors = require("config.theme").colors
+        local heading_fg = {
+          colors.green_bright, colors.tan, colors.cyan,
+          colors.brown, colors.green, colors.green_dim,
+        }
         for level = 1, 6 do
           vim.api.nvim_set_hl(0, "RenderMarkdownH" .. level .. "Bg", { bg = colors.bg })
           vim.api.nvim_set_hl(0, "RenderMarkdownH" .. level, {
-            fg = level == 1 and colors.green or (level == 2 and colors.tan or colors.fg),
+            fg = heading_fg[level],
             bg = colors.bg,
             bold = true,
           })

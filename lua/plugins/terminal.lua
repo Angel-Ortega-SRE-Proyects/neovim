@@ -18,6 +18,7 @@
 --   :Tb ls -la       abre el pane de tmux y ejecuta ese comando
 local term_bufnr = nil
 local t = require("config.i18n").t
+local platform = require("config.platform")
 
 local function open_tab_terminal(args)
   if term_bufnr and vim.api.nvim_buf_is_valid(term_bufnr) then
@@ -68,7 +69,7 @@ local function tmux_pane_exists(id)
 end
 
 vim.api.nvim_create_user_command("Tb", function(cmd_opts)
-  if vim.env.TMUX == nil then
+  if vim.env.TMUX == nil or not platform.executable("tmux") then
     vim.notify("Tb necesita Neovim corriendo dentro de una sesión de tmux", vim.log.levels.WARN)
     return
   end
@@ -95,12 +96,7 @@ end, { nargs = "*", desc = "Panel de tmux real abajo (opcional: comando a ejecut
 -- :Sys -> monitor de recursos en una ventana flotante con la herramienta
 -- disponible de mayor calidad visual y `top` como respaldo.
 vim.api.nvim_create_user_command("Sys", function()
-  local monitor = vim.fn.executable("btop") == 1 and "btop"
-    or vim.fn.executable("htop") == 1 and "htop"
-    or "top -o %CPU"
-  local monitor_name = monitor == "btop" and "btop"
-    or monitor == "htop" and "htop"
-    or "top"
+  local monitor, monitor_name = platform.monitor_command()
   local width = math.max(80, math.floor(vim.o.columns * 0.92))
   local height = math.max(20, math.floor(vim.o.lines * 0.86))
   local buf = vim.api.nvim_create_buf(false, true)

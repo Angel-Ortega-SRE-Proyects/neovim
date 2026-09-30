@@ -3,6 +3,7 @@
 -- vez que cambiás de cwd (VimEnter / :cd) -- lua/plugins/projects.lua tiene
 -- el picker de Telescope que la usa.
 local M = {}
+local platform = require("config.platform")
 
 local FILE = vim.fn.stdpath("state") .. "/projects.json"
 local MAX_ENTRIES = 20
@@ -11,7 +12,10 @@ local function normalize(path)
   -- fnamemodify ":p" resuelve a absoluto; sacar la barra final para que
   -- "/a/b" y "/a/b/" no cuenten como dos carpetas distintas.
   local abs = vim.fn.fnamemodify(path, ":p")
-  return abs:gsub("/$", "")
+  if platform.is_windows then
+    abs = abs:gsub("\\", "/")
+  end
+  return abs:gsub("[/\\]+$", "")
 end
 
 local function read_all()

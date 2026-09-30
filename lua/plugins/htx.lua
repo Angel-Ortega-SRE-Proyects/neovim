@@ -11,8 +11,12 @@
 --
 --   <leader>hi / <leader>hp / <leader>hl
 
-local DEFAULT_PROFILE = "software_developer"
-local DEFAULT_ASSISTANT = "claude"
+if not require("config.integrations").enabled("htx") then return {} end
+
+local agent_adapters = require("config.agent_adapters")
+
+local DEFAULT_PROFILE = vim.g.nvim_agent_profile or vim.env.NVIM_AGENT_PROFILE or "software_developer"
+local DEFAULT_ASSISTANT = agent_adapters.default_id()
 local DEFAULT_RULES = "all"
 
 local function float_opts(title)

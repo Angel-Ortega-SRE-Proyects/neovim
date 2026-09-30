@@ -308,6 +308,28 @@ local common = {
     es = "Generar mensaje de commit con Copilot",
     en = "Generate commit message with Copilot",
   },
+  ["Ctrl-G genera con Copilot Chat · q/Esc cancela"] = {
+    es = "Ctrl-G genera con Copilot Chat · q/Esc cancela",
+    en = "Ctrl-G generates with Copilot Chat · q/Esc cancels",
+  },
+  ["CopilotChat no está instalado o no cargó. Revisa lua/plugins/copilot_chat.lua."] = {
+    es = "CopilotChat no está instalado o no cargó. Revisa lua/plugins/copilot_chat.lua.",
+    en = "CopilotChat is not installed or failed to load. Check lua/plugins/copilot_chat.lua.",
+  },
+  ["Copilot Chat no devolvió una respuesta"] = {
+    es = "Copilot Chat no devolvió una respuesta",
+    en = "Copilot Chat did not return a response",
+  },
+  ["mensaje generado"] = { es = "mensaje generado", en = "message generated" },
+  ["Genera un mensaje de commit siguiendo estas reglas y el diff de abajo. Responde ÚNICAMENTE con el mensaje del commit, sin explicaciones ni bloques de código."] = {
+    es = "Genera un mensaje de commit siguiendo estas reglas y el diff de abajo. Responde ÚNICAMENTE con el mensaje del commit, sin explicaciones ni bloques de código.",
+    en = "Generate a commit message following these rules and the diff below. Reply ONLY with the commit message, no explanations or code fences.",
+  },
+  ["Preparar todo (git add -A) y commitear"] = {
+    es = "Preparar todo (git add -A) y commitear",
+    en = "Stage everything (git add -A) and commit",
+  },
+  ["No hay cambios en staging"] = { es = "No hay cambios en staging", en = "Nothing is staged" },
 }
 
 for key, value in pairs(common) do

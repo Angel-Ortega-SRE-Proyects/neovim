@@ -3,6 +3,7 @@
 -- almacenamiento local de su CLI y devuelve entradas con la misma forma que
 -- config.codex_sessions, así el Agent Hub las trata de forma uniforme.
 local M = {}
+local platform = require("config.platform")
 
 M.ACTIVE_WINDOW = 15 * 60
 M.EXECUTING_WINDOW = 5
@@ -49,7 +50,8 @@ end
 ---@return string
 function M.normalize_cwd(path)
   local cwd = vim.fn.fnamemodify(path, ":p")
-  if cwd ~= "/" then cwd = cwd:gsub("/$", "") end
+  if platform.is_windows then cwd = cwd:gsub("\\", "/") end
+  if cwd ~= "/" then cwd = cwd:gsub("[/\\]+$", "") end
   return cwd
 end
 

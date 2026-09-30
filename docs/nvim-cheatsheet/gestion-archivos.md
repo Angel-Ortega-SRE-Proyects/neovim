@@ -21,6 +21,8 @@ nuevo, `:w` crea el archivo en la ruta indicada.
 - `:vsplit ruta/archivo`: abrir una ruta en vista vertical.
 - `:split ruta/archivo`: abrir una ruta en vista horizontal.
 - En NvimTree, `v` abre vertical y `s` abre horizontal.
+- En NvimTree, `Ctrl-w s/v` está desactivado para no dividir el explorador;
+  úsalo desde el buffer del archivo.
 - `Ctrl+←/↓/↑/→`: cambiar entre las vistas.
 
 ## Crear archivos

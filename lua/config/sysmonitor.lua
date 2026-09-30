@@ -3,13 +3,13 @@
 -- intervalo o el formato de M.status() a tu gusto.
 -- CPU se muestra en %; memoria y disco en GB usados/total; red en KB/s o MB/s.
 --
--- Linux lee /proc (rápido, sin spawnear procesos); macOS no tiene /proc,
--- así que ahí se apoya en top/vm_stat/sysctl/netstat vía vim.system (async,
--- igual que ya hacía read_disk con `df`) — un poco más caro pero corre en
--- un timer de fondo, no bloquea la UI.
+-- Linux lee /proc; macOS usa top/vm_stat/sysctl/netstat y Windows usa un
+-- snapshot de PowerShell vía vim.system, sin bloquear la interfaz.
 local M = {}
+local platform = require("config.platform")
 
-local is_mac = vim.uv.os_uname().sysname == "Darwin"
+local is_mac = platform.is_macos
+local is_windows = platform.is_windows
 
 local cpu_pct = 0
 local mem_used_gb, mem_total_gb = 0, 0
@@ -198,15 +198,47 @@ local function read_net_mac()
   end)
 end
 
-local read_cpu = is_mac and read_cpu_mac or read_cpu_linux
-local read_mem = is_mac and read_mem_mac or read_mem_linux
-local read_net = is_mac and read_net_mac or read_net_linux
+-- Windows no expone /proc. Se consulta un snapshot pequeño con PowerShell;
+-- la red queda en cero si el proveedor no está disponible, sin romper la
+-- barra de estado ni el resto de la configuración.
+local function read_windows()
+  if not platform.executable("powershell.exe") then return end
+  local script = [[
+$os = Get-CimInstance Win32_OperatingSystem
+$cpu = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
+$disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"
+Write-Output "$cpu|$($os.TotalVisibleMemorySize)|$($os.FreePhysicalMemory)|$($disk.Size)|$($disk.Size - $disk.FreeSpace)"
+]]
+  vim.system({ "powershell.exe", "-NoProfile", "-Command", script }, { text = true }, function(res)
+    if res.code ~= 0 or type(res.stdout) ~= "string" then return end
+    local cpu, total_kb, free_kb, disk_total, disk_used = res.stdout:match(
+      "([%d%.]+)|([%d%.]+)|([%d%.]+)|([%d%.]+)|([%d%.]+)"
+    )
+    if cpu then cpu_pct = math.floor(tonumber(cpu) + 0.5) end
+    if total_kb and free_kb then
+      mem_total_gb = tonumber(total_kb) / 1024 / 1024
+      mem_used_gb = (tonumber(total_kb) - tonumber(free_kb)) / 1024 / 1024
+    end
+    if disk_total and disk_used then
+      disk_total_gb = tonumber(disk_total) / 1024 / 1024 / 1024
+      disk_used_gb = tonumber(disk_used) / 1024 / 1024 / 1024
+    end
+  end)
+end
+
+local read_cpu = is_windows and function() end or (is_mac and read_cpu_mac or read_cpu_linux)
+local read_mem = is_windows and function() end or (is_mac and read_mem_mac or read_mem_linux)
+local read_net = is_windows and function() end or (is_mac and read_net_mac or read_net_linux)
 
 local function tick()
-  read_cpu()
-  read_mem()
-  read_disk()
-  read_net()
+  if is_windows then
+    read_windows()
+  else
+    read_cpu()
+    read_mem()
+    read_disk()
+    read_net()
+  end
 end
 
 local started_timer = nil

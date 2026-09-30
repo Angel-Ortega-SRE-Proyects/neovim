@@ -4,15 +4,7 @@
 -- por segundo y no conviene re-escanear el disco en cada frame.
 local M = {}
 local CACHE_TTL = 2
-
-local PROVIDERS = {
-  { kind = "Claude Code", cmd = "claude", module = "config.agent_sessions.claude" },
-  { kind = "Codex", cmd = "codex", module = "config.codex_sessions" },
-  { kind = "OpenCode", cmd = "opencode", module = "config.agent_sessions.opencode" },
-  { kind = "Gemini", cmd = "gemini", module = "config.agent_sessions.gemini" },
-  { kind = "Copilot", cmd = "copilot", module = "config.agent_sessions.copilot" },
-  { kind = "Grok", cmd = "grok", module = "config.agent_sessions.grok" },
-}
+local adapters = require("config.agent_adapters")
 
 local cache = { at = -math.huge, sessions = {} }
 
@@ -30,11 +22,16 @@ end
 ---@return table[]
 function M.providers()
   local available = {}
-  for _, provider in ipairs(PROVIDERS) do
-    if M.is_installed(provider.cmd) then
-      local ok, module = pcall(require, provider.module)
+  for _, adapter in ipairs(adapters.available()) do
+    if M.is_installed(adapter.cli) then
+      local ok, module = pcall(require, adapter.module)
       if ok then
-        table.insert(available, { kind = provider.kind, cmd = provider.cmd, impl = module })
+        table.insert(available, {
+          id = adapter.id,
+          kind = adapter.kind,
+          cmd = adapter.cli,
+          impl = module,
+        })
       end
     end
   end
@@ -43,9 +40,9 @@ end
 
 local function provider_for(session)
   local kind = session and session.kind or "Codex"
-  for _, provider in ipairs(PROVIDERS) do
-    if provider.kind == kind then
-      local ok, module = pcall(require, provider.module)
+  for _, adapter in ipairs(adapters.all()) do
+    if adapter.kind == kind or (session and adapter.id == session.adapter_id) then
+      local ok, module = pcall(require, adapter.module)
       return ok and module or nil
     end
   end
@@ -59,6 +56,7 @@ local function collect()
     if ok and type(list) == "table" then
       for _, session in ipairs(list) do
         session.kind = session.kind or provider.kind
+        session.adapter_id = session.adapter_id or provider.id
         table.insert(sessions, session)
       end
     else
@@ -75,8 +73,8 @@ end
 --- Descarta el caché (p. ej. tras eliminar una sesión).
 function M.invalidate()
   cache.at = -math.huge
-  for _, provider in ipairs(PROVIDERS) do
-    local module = package.loaded[provider.module]
+  for _, adapter in ipairs(adapters.all()) do
+    local module = package.loaded[adapter.module]
     if type(module) == "table" and type(module.invalidate) == "function" then
       module.invalidate()
     end

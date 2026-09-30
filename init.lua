@@ -24,6 +24,7 @@ if ok_which_key then
   })
 end
 require("config.project_settings").setup()
+package.loaded["config.buffers"] = nil
 require("config.buffers").setup()
 require("config.autocmds")
 require("config.theme")
@@ -36,6 +37,27 @@ package.loaded["config.git_mode"] = nil
 package.loaded["config.git_commit"] = nil
 require("config.git_mode").setup_keymaps()
 require("config.alerts").setup()
+
+local function load_extensions()
+  if not require("config.integrations").enabled("extensions") then return end
+  local extension_file = vim.fn.stdpath("config") .. "/lua/extensions/init.lua"
+  if vim.fn.filereadable(extension_file) == 1 then
+    -- Cargar por ruta absoluta permite que :ConfigReload detecte módulos
+    -- creados después de arrancar Neovim, incluso con vim.loader activo.
+    package.loaded["extensions"] = nil
+    local loader, err = loadfile(extension_file)
+    if not loader then error(err) end
+    local extensions = loader()
+    package.loaded["extensions"] = extensions
+    extensions.load()
+    return
+  end
+
+  local ok, extensions = pcall(require, "extensions")
+  if ok and type(extensions.load) == "function" then extensions.load() end
+end
+
+load_extensions()
 
 local function reload_theme_module()
   local current = package.loaded["config.theme"]
@@ -88,6 +110,17 @@ vim.api.nvim_create_user_command("ConfigReload", function()
   reload_theme_module().reload()
   local wk_ok, wk_plugin = pcall(require, "plugins.which-key")
   if wk_ok and type(wk_plugin.refresh_i18n) == "function" then wk_plugin.refresh_i18n() end
+  require("config.buffers").reapply()
+  -- render-markdown recibe opts una sola vez (lazy.nvim); se re-evalúa el
+  -- spec desde disco y se vuelve a llamar su config para aplicar los cambios.
+  package.loaded["plugins.markdown"] = nil
+  local md_ok, md_spec = pcall(require, "plugins.markdown")
+  local rm = md_ok and md_spec[1]
+  if rm and package.loaded["render-markdown"] then
+    pcall(rm.config, nil, rm.opts)
+    pcall(vim.cmd, "RenderMarkdown disable")
+    pcall(vim.cmd, "RenderMarkdown enable")
+  end
   vim.api.nvim_echo({
     { i18n.t("Configuración recargada: "), "Normal" },
     { config_file, "String" },

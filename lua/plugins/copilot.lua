@@ -15,6 +15,8 @@
 --
 -- Icono de estado en la barra de abajo (● listo, ◐ pensando, ○ apagado/sin
 -- auth, ✕ error) -- ver lua/config/statusline.lua.
+if not require("config.integrations").enabled("copilot") then return {} end
+
 return {
   "zbirenbaum/copilot.lua",
   cmd = "Copilot",

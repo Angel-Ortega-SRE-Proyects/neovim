@@ -8,30 +8,21 @@ local function repo_label(root)
   return vim.fn.fnamemodify(root, ":t")
 end
 
--- copilot.lua carga (event = "InsertEnter" en plugins/copilot.lua) recién
--- la primera vez que se entra a modo inserción en la sesión -- si esa
--- primera vez es exactamente cuando abrimos el buffer de commit, el
--- cliente LSP arranca y autentica EN ESE MOMENTO (cold start de varios
--- segundos) justo cuando más necesitamos una respuesta rápida
--- (confirmado en copilot-lua.log: primera respuesta ~4ms con
--- completions={}, seguida 3-4s después de un "finish reason: stop" que
--- ya no llega a tiempo). M.warm() fuerza ese arranque antes -- se llama
--- al abrir el menú Git Hub o el panel de cambios, dándole al cliente
--- varios segundos de margen mientras el usuario todavía está navegando.
+-- El ghost-text de copilot.lua (suggestion.next(), endpoint "getCompletions")
+-- devuelve consistentemente `completions = {}` para el filetype `gitcommit`
+-- (languageId normalizado a "git-commit") -- reproducido en aislamiento:
+-- cliente ya autenticado y "Normal", diff chico, cursor en la mejor
+-- posición posible, y aun así respuesta vacía en <10ms. Confirmado además
+-- que en archivos de código normales sí sugiere -- no es config nuestra,
+-- es que ese endpoint está pensado para continuar código, no para generar
+-- prosa desde cero. Por eso usamos CopilotChat.nvim (endpoint de chat,
+-- diseñado justamente para esto) en su lugar -- ver plugins/copilot_chat.lua.
 local warmed = false
 function M.warm()
   if warmed then return end
   local ok_lazy, lazy = pcall(require, "lazy")
-  if ok_lazy then pcall(lazy.load, { plugins = { "copilot.lua" } }) end
-  local ok_command, command = pcall(require, "copilot.command")
-  if not ok_command then return end
+  if ok_lazy then pcall(lazy.load, { plugins = { "copilot.lua", "CopilotChat.nvim" } }) end
   warmed = true
-  local buf = vim.api.nvim_create_buf(false, true)
-  vim.bo[buf].filetype = "gitcommit"
-  pcall(command.attach, { bufnr = buf, force = true })
-  vim.defer_fn(function()
-    if vim.api.nvim_buf_is_valid(buf) then vim.api.nvim_buf_delete(buf, { force = true }) end
-  end, 15000)
 end
 
 local function idle_winbar(root)
@@ -112,68 +103,55 @@ local function fallback_commit_message(buf, root)
   return nil
 end
 
-local function trigger_copilot(buf, root, win)
-  local ok, suggestion = pcall(require, "copilot.suggestion")
-  if not ok then
-    vim.notify(i18n.t("Copilot no está cargado. Ejecuta :Copilot status."), vim.log.levels.WARN)
-    return
-  end
+local function build_chat_prompt(root, staged_ok, diff_lines)
+  local rules = {
+    i18n.t("Genera un mensaje de commit siguiendo estas reglas y el diff de abajo. Responde ÚNICAMENTE con el mensaje del commit, sin explicaciones ni bloques de código."),
+    i18n.t("Título (línea 1): tipo(scope): descripción corta en imperativo, sin punto final."),
+    i18n.t("  Tipo: usa 'feat' SOLO si el diff agrega funcionalidad nueva. Para todo lo demás"),
+    i18n.t("  (correcciones, ajustes de comportamiento, refactor, estilo, docs, tests, tareas"),
+    i18n.t("  de mantenimiento) usa 'fix', 'refactor', 'style', 'docs', 'test' o 'chore' según"),
+    i18n.t("  corresponda -- nunca 'feat' para un ajuste."),
+    i18n.t("  Scope: nombre corto del módulo/área principal tocada por el diff."),
+    i18n.t("Cuerpo: deja una línea en blanco tras el título. Si el diff mezcla features nuevas"),
+    i18n.t("  con ajustes/correcciones, agrega dos listas con viñetas '-':"),
+    "  " .. i18n.t("Features:"),
+    "  - ...",
+    "  " .. i18n.t("Ajustes:"),
+    "  - ...",
+    i18n.t("  Si el diff es solo de un tipo, incluí solo esa lista (o ninguna si el título ya"),
+    i18n.t("  describe todo el cambio). No inventes cambios que no estén en el diff."),
+    "",
+    i18n.t("Repositorio:") .. " " .. repo_label(root),
+    (staged_ok and i18n.t("Hay cambios staged listos para commit.") or i18n.t("Aviso: estos cambios aún no están staged; agrégalos antes de guardar.")),
+    "",
+  }
+  vim.list_extend(rules, diff_lines)
+  return table.concat(rules, "\n")
+end
 
-  local command_ok, command = pcall(require, "copilot.command")
-  if command_ok then
-    pcall(command.attach, { bufnr = buf, force = true })
-  end
+local function sanitize_chat_response(text)
+  text = vim.trim(text or "")
+  -- Algunos modelos envuelven la respuesta en un bloque de código pese a
+  -- que se les pidió que no lo hagan -- quitarlo si aparece.
+  text = text:gsub("^```[%w_-]*\n?", ""):gsub("\n?```$", "")
+  return vim.trim(text)
+end
 
-  start_copilot_spinner(buf, win, root)
-
-  local attempts = { 0, 750, 2000, 4000, 7000, 10000 }
-  local last_error
-  local function request(index)
-    if not vim.api.nvim_buf_is_valid(buf) then
-      stop_copilot_spinner(buf, win)
-      return
+local function insert_chat_message(buf, message)
+  if not vim.api.nvim_buf_is_valid(buf) then return end
+  local msg_lines = vim.split(message, "\n", { plain = true })
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  local insert_at = 0
+  for index, line in ipairs(lines) do
+    if vim.trim(line) == "" then
+      insert_at = index - 1
+      break
     end
-    if vim.api.nvim_get_current_buf() ~= buf then
-      local wins = vim.fn.win_findbuf(buf)
-      if #wins > 0 and vim.api.nvim_win_is_valid(wins[1]) then
-        vim.api.nvim_set_current_win(wins[1])
-      end
-    end
-    if vim.fn.mode() ~= "i" then vim.cmd("startinsert") end
-    local visible_ok, visible = pcall(suggestion.is_visible)
-    if visible_ok and visible then
-      stop_copilot_spinner(buf, win, " COMMIT · " .. repo_label(root) .. " · " .. i18n.t("sugerencia lista, Tab para aceptar") .. " ")
-      return
-    end
-    local trigger_ok, trigger_error = pcall(suggestion.next)
-    if not trigger_ok then last_error = trigger_error end
-    if index < #attempts then
-      vim.defer_fn(function() request(index + 1) end, attempts[index + 1] - attempts[index])
-      return
-    end
-    local status = i18n.t("sin respuesta")
-    local status_ok, copilot_status = pcall(require, "config.copilot_status")
-    if status_ok and copilot_status.message ~= "" then status = copilot_status.message end
-    if last_error then status = tostring(last_error) end
-    local attach_status = i18n.t("desconocido")
-    local client_ok, client = pcall(require, "copilot.client")
-    local util_ok, util = pcall(require, "copilot.util")
-    if client_ok and util_ok then
-      local attached = client.buf_is_attached(buf) and i18n.t("adjunto") or i18n.t("no adjunto")
-      attach_status = attached .. " · " .. util.get_buffer_attach_status(buf)
-    end
-    local fallback = fallback_commit_message(buf, root)
-    stop_copilot_spinner(buf, win, " COMMIT · " .. repo_label(root) .. " · " .. i18n.t("Copilot sin respuesta, revisa con Ctrl-G") .. " ")
-    vim.notify(
-      i18n.t("Copilot no generó una sugerencia: ") .. status
-        .. i18n.t("\nBuffer: ") .. attach_status
-        .. i18n.t("\nModo: ") .. vim.fn.mode()
-        .. i18n.t("\nLog: ") .. vim.fn.stdpath("log") .. "/copilot-lua.log"
-        .. (fallback and (i18n.t("\nSe insertó una propuesta local: ") .. fallback) or ""),
-      vim.log.levels.WARN
-    )
   end
-  vim.defer_fn(function() request(1) end, attempts[1])
+  vim.bo[buf].modifiable = true
+  vim.api.nvim_buf_set_lines(buf, insert_at, insert_at + 1, false, msg_lines)
+  local last_line = insert_at + #msg_lines
+  vim.api.nvim_win_set_cursor(0, { last_line, #msg_lines[#msg_lines] })
 end
 
 local function request_copilot_message(buf, root, win)
@@ -184,73 +162,71 @@ local function request_copilot_message(buf, root, win)
     vim.notify(i18n.t("No hay cambios para describir"), vim.log.levels.WARN)
     return
   end
-  if vim.b[buf].copilot_commit_prompt then
-    trigger_copilot(buf, root, win)
+
+  local ok_chat, chat = pcall(require, "CopilotChat")
+  if not ok_chat then
+    vim.notify(i18n.t("CopilotChat no está instalado o no cargó. Revisa lua/plugins/copilot_chat.lua."), vim.log.levels.WARN)
     return
   end
-  vim.b[buf].copilot_commit_prompt = true
 
-  -- El mensaje va PRIMERO (cursor en línea 1) y el diff al final, como
-  -- hace `git commit -v` -- con el diff completo arriba, el cursor
-  -- quedaba al fondo de un muro de ~400 líneas de comentarios sin nada
-  -- después, y Copilot respondía con completions vacías en esa posición
-  -- (confirmado en copilot-lua.log: respuesta rápida, 0 sugerencias).
-  local lines = {
-    "",
-    "# " .. i18n.t("Repositorio:") .. " " .. repo_label(root),
-    "# " .. i18n.t("Ruta:") .. " " .. vim.fn.fnamemodify(root, ":~"),
-    "# " .. (staged_ok
-      and i18n.t("Copilot: analiza el diff completo (staged) de abajo y genera un commit Conventional Commits.")
-      or i18n.t("Copilot: analiza el diff completo de abajo y genera un commit Conventional Commits.")),
-    "# " .. i18n.t("Título (línea 1): tipo(scope): descripción corta en imperativo, sin punto final."),
-    "# " .. i18n.t("  Tipo: usa 'feat' SOLO si el diff agrega funcionalidad nueva. Para todo lo demás"),
-    "# " .. i18n.t("  (correcciones, ajustes de comportamiento, refactor, estilo, docs, tests, tareas"),
-    "# " .. i18n.t("  de mantenimiento) usa 'fix', 'refactor', 'style', 'docs', 'test' o 'chore' según"),
-    "# " .. i18n.t("  corresponda -- nunca 'feat' para un ajuste."),
-    "# " .. i18n.t("  Scope: nombre corto del módulo/área principal tocada por el diff."),
-    "# " .. i18n.t("Cuerpo: deja una línea en blanco tras el título. Si el diff mezcla features nuevas"),
-    "# " .. i18n.t("  con ajustes/correcciones, agrega dos listas con viñetas '-':"),
-    "#     " .. i18n.t("Features:"),
-    "#     - ...",
-    "#     " .. i18n.t("Ajustes:"),
-    "#     - ...",
-    "# " .. i18n.t("  Si el diff es solo de un tipo, incluí solo esa lista (o ninguna si el título ya"),
-    "# " .. i18n.t("  describe todo el cambio). No inventes cambios que no estén en el diff."),
-    "# " .. (staged_ok and i18n.t("Hay cambios staged listos para commit.") or i18n.t("Aviso: estos cambios aún no están staged; agrégalos antes de guardar.")),
-    "# " .. i18n.t("Ctrl-G genera con Copilot · Tab acepta · Ctrl-] descarta"),
-    "# " .. i18n.t("Escribe el mensaje manualmente o solicita una sugerencia."),
-    "# " .. string.format(i18n.t("--- diff completo (%d líneas) ---"), #diff_lines),
-  }
-  local MAX_DIFF_LINES = 400
+  local MAX_DIFF_LINES = 800
   local truncated = #diff_lines > MAX_DIFF_LINES
   local shown_diff = truncated and vim.list_slice(diff_lines, 1, MAX_DIFF_LINES) or diff_lines
-  for _, line in ipairs(shown_diff) do
-    lines[#lines + 1] = "# " .. line
-  end
-  if truncated then
-    lines[#lines + 1] = "# " .. string.format(
-      i18n.t("... diff truncado (%d de %d líneas) para no saturar el contexto de Copilot ..."),
-      MAX_DIFF_LINES, #diff_lines
-    )
-  end
-  lines[#lines + 1] = "# " .. i18n.t("--- fin del diff ---")
+  local prompt = build_chat_prompt(root, staged_ok, shown_diff)
 
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  vim.api.nvim_win_set_cursor(0, { 1, 0 })
-  vim.cmd("startinsert")
-  trigger_copilot(buf, root, win)
+  start_copilot_spinner(buf, win, root)
+  local answered = false
+
+  local function finish(message, notify_text)
+    if answered then return end
+    answered = true
+    if not vim.api.nvim_buf_is_valid(buf) then return end
+    if message and message ~= "" then
+      insert_chat_message(buf, message)
+      stop_copilot_spinner(buf, win, " COMMIT · " .. repo_label(root) .. " · " .. i18n.t("mensaje generado") .. " ")
+    else
+      local fallback = fallback_commit_message(buf, root)
+      stop_copilot_spinner(buf, win, " COMMIT · " .. repo_label(root) .. " · " .. i18n.t("Copilot sin respuesta, revisa con Ctrl-G") .. " ")
+      vim.notify(
+        (notify_text or i18n.t("Copilot Chat no devolvió una respuesta"))
+          .. (fallback and (i18n.t("\nSe insertó una propuesta local: ") .. fallback) or ""),
+        vim.log.levels.WARN
+      )
+    end
+  end
+
+  -- Salvavidas: si CopilotChat nunca llama al callback (error interno
+  -- silencioso, cancelación, etc.), no dejar el spinner girando para siempre.
+  vim.defer_fn(function() finish(nil) end, 25000)
+
+  local ask_ok, ask_err = pcall(chat.ask, prompt, {
+    headless = true,
+    callback = vim.schedule_wrap(function(response)
+      local content = response and sanitize_chat_response(response.content)
+      finish(content ~= "" and content or nil)
+    end),
+  })
+  if not ask_ok then
+    finish(nil, tostring(ask_err))
+  end
 end
 
 function M.open(root, on_success, target_win, on_cancel)
   local buf = vim.api.nvim_create_buf(true, false)
+  local staged = vim.fn.systemlist({ "git", "-C", root, "diff", "--cached" })
+  local staged_ok = vim.v.shell_error == 0 and #staged > 0
   vim.bo[buf].bufhidden = "wipe"
   vim.bo[buf].swapfile = false
   vim.bo[buf].buflisted = true
   vim.api.nvim_buf_set_name(buf, "COMMIT_EDITMSG-" .. buf)
   vim.bo[buf].filetype = "gitcommit"
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, {
+    "# " .. i18n.t("Repositorio:") .. " " .. repo_label(root),
+    "# " .. i18n.t("Ruta:") .. " " .. vim.fn.fnamemodify(root, ":~"),
+    "# " .. (staged_ok and i18n.t("Hay cambios staged listos para commit")
+      or i18n.t("Aviso: estos cambios aún no están staged")),
     "",
-    "# " .. i18n.t("Ctrl-G genera con Copilot · Tab acepta · Ctrl-] descarta"),
+    "# " .. i18n.t("Ctrl-G genera con Copilot Chat · q/Esc cancela"),
     "# " .. i18n.t("Escribe el mensaje manualmente o solicita una sugerencia."),
   })
   local win
@@ -335,19 +311,45 @@ function M.open(root, on_success, target_win, on_cancel)
         vim.notify(i18n.t("El commit necesita un mensaje"), vim.log.levels.WARN)
         return
       end
-      vim.system({ "git", "-C", root, "commit", "-F", "-" },
-        { text = true, stdin = message }, function(result)
-          vim.schedule(function()
-            if result.code ~= 0 then
-              vim.notify(vim.trim(result.stderr or "") ~= "" and vim.trim(result.stderr) or i18n.t("No se pudo crear el commit"), vim.log.levels.ERROR)
-              return
-            end
-            restore(false)
-            if vim.api.nvim_buf_is_valid(buf) then vim.api.nvim_buf_delete(buf, { force = true }) end
-            vim.notify(i18n.t("Commit creado"), vim.log.levels.INFO)
-            if on_success then on_success() end
+      local function commit()
+        vim.system({ "git", "-C", root, "commit", "-F", "-" },
+          { text = true, stdin = message }, function(result)
+            vim.schedule(function()
+              if result.code ~= 0 then
+                -- git escribe "nothing to commit" / "no changes added" en
+                -- stdout, no en stderr: mostrar el que tenga contenido.
+                local detail = vim.trim(result.stderr or "")
+                if detail == "" then detail = vim.trim(result.stdout or "") end
+                vim.notify(detail ~= "" and detail or i18n.t("No se pudo crear el commit"), vim.log.levels.ERROR)
+                return
+              end
+              restore(false)
+              if vim.api.nvim_buf_is_valid(buf) then vim.api.nvim_buf_delete(buf, { force = true }) end
+              vim.notify(i18n.t("Commit creado"), vim.log.levels.INFO)
+              if on_success then on_success() end
+            end)
           end)
+      end
+
+      -- `git commit` falla si no hay nada en staging. Se ofrece prepararlo
+      -- todo en vez de obligar a salir del flujo (git add -A es reversible
+      -- con git reset).
+      local staged = vim.system({ "git", "-C", root, "diff", "--cached", "--quiet" }):wait()
+      if staged.code == 0 then
+        vim.ui.select({ i18n.t("Preparar todo (git add -A) y commitear"), i18n.t("Cancelar") }, {
+          prompt = i18n.t("No hay cambios en staging"),
+        }, function(_, index)
+          if index ~= 1 then return end
+          local added = vim.system({ "git", "-C", root, "add", "-A" }, { text = true }):wait()
+          if added.code ~= 0 then
+            vim.notify(vim.trim(added.stderr or ""), vim.log.levels.ERROR)
+            return
+          end
+          commit()
         end)
+        return
+      end
+      commit()
     end,
   })
 end

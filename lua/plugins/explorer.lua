@@ -146,6 +146,23 @@ return {
         resize_window = true,
       },
     },
+    on_attach = function(bufnr)
+      -- Evita que los atajos globales de split dividan el explorador.
+      -- En NvimTree, `s` y `v` siguen disponibles para abrir el archivo
+      -- seleccionado en una división horizontal o vertical.
+      vim.keymap.set("n", "<C-w>s", "<Nop>", {
+        buffer = bufnr,
+        nowait = true,
+        silent = true,
+        desc = "Desactivar split horizontal en el explorador",
+      })
+      vim.keymap.set("n", "<C-w>v", "<Nop>", {
+        buffer = bufnr,
+        nowait = true,
+        silent = true,
+        desc = "Desactivar split vertical en el explorador",
+      })
+    end,
     -- Que nvim-tree NO se quede como única ventana al cerrar el último buffer
     tab = { sync = { open = false, close = false } },
   },

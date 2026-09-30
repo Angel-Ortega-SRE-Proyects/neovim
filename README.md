@@ -11,6 +11,8 @@ lua/config/
   keymaps.lua             -- keymaps globales
   autocmds.lua            -- autocomandos
   lazy.lua                -- bootstrap de lazy.nvim
+  platform.lua            -- diferencias entre Linux, macOS y Windows
+  agent_adapters.lua      -- registro de CLIs, reglas y proveedores de agentes
 lua/plugins/
   colorscheme.lua         -- tokyonight
   treesitter.lua          -- resaltado/indentado por AST
@@ -18,6 +20,7 @@ lua/plugins/
   lsp.lua                 -- mason + lspconfig
   cmp.lua                 -- autocompletado
   editor.lua              -- lualine, gitsigns, nvim-tree, which-key, etc.
+  ai_cli.lua              -- Agent Hub (se conserva como funcionalidad base)
 lazy-lock.json             -- versiones exactas de plugins (se genera al instalar)
 ```
 
@@ -121,6 +124,42 @@ volver al modo flotante.
 En AgentHub, `g` agrega repositorios al panel Git sin reemplazar los anteriores.
 Los archivos modificados aparecen agrupados por repositorio; `r` actualiza todos
 los repositorios observados.
+
+### Adaptadores y reglas de agentes
+
+Los proveedores se registran en
+[lua/config/agent_adapters.lua](lua/config/agent_adapters.lua). Ahí puedes
+cambiar la CLI, el comando de Neovim, el parser de sesiones y la prioridad de
+los archivos de reglas sin modificar Agent Hub.
+
+`:AgentRules [agente]` abre el primer archivo de reglas existente del proyecto.
+Por ejemplo, Codex usa `AGENTS.md`, Claude prioriza `CLAUDE.md` y Copilot
+prioriza `.github/copilot-instructions.md`. Si no existe ninguno, abre el primer
+nombre configurado para crearlo.
+
+También puedes cambiar el agente y perfil predeterminados antes de cargar la
+configuración:
+
+    vim.g.nvim_agent_default = "codex"
+    vim.g.nvim_agent_profile = "software_developer"
+    vim.g.nvim_agent_adapters = {
+      codex = { rules = { "AGENTS.md", ".agents/rules.md" } },
+    }
+
+Agent Hub y Git forman parte de la base actual. Las extensiones de agentes,
+integraciones adicionales y proveedores nuevos se mantienen aislados mediante
+este registro para poder extraerlos después como módulos independientes.
+
+## Plataformas
+
+La configuración detecta Linux, macOS y Windows para abrir archivos externos,
+consultar el directorio de las terminales y seleccionar el monitor del sistema.
+tmux se activa solo cuando está instalado; si no existe, se usan splits y
+terminales internas de Neovim. En Windows puedes usar
+[bin/nvim-fullscreen.ps1](bin/nvim-fullscreen.ps1) desde PowerShell.
+
+Consulta la guía completa de activación, desactivación y valores predeterminados
+en [docs/nvim-cheatsheet/integraciones.md](docs/nvim-cheatsheet/integraciones.md).
 
 ## Modo Git global
 
