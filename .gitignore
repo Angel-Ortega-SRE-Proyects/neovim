@@ -11,6 +11,8 @@ hello.txt
 /.claude/
 /.memory/
 /.claudeignore
+/CLAUDE.md
+/.clauderules
 /AGENTS.md
 /task.md
 /implementation_plan.md
